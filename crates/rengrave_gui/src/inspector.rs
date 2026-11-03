@@ -23,15 +23,15 @@ impl RengraveApp {
     /// Draws the panel: tabs, the active tab's settings, and the primary action.
     pub(crate) fn inspector(&mut self, ui: &mut Ui) {
         ui.add_space(4.0);
-        ui.option_group(|ui| {
-            ui.selectable_value(&mut self.tab, Tab::Design, "Design")
-                .on_hover_text("What to cut, and where");
-            ui.selectable_value(&mut self.tab, Tab::Toolpath, "Toolpath")
-                .on_hover_text("How to cut it");
-            ui.selectable_value(&mut self.tab, Tab::Output, "Output")
-                .on_hover_text("G-code format and exports");
-        });
-        ui.separator();
+        ui.tab_bar(
+            &mut self.tab,
+            &[
+                (Tab::Design, "Design", "What to cut, and where"),
+                (Tab::Toolpath, "Toolpath", "How to cut it"),
+                (Tab::Output, "Output", "G-code format and exports"),
+            ],
+        );
+        ui.add_space(6.0);
 
         // Reserve room for the fixed action area at the bottom.
         egui::Panel::bottom("inspector_actions")

@@ -178,7 +178,7 @@ how rengrave will be distributed. The earlier sources F-Engrave credits (cxf2cnc
 LinuxCNC's Author.py, and others) were taken on trust from its GPL-3.0-or-later distribution, and
 their licenses were not checked individually.
 
-## D16. Interface style: neutral chrome, turquoise focus, bundled fonts
+## D16. Interface style: neutral chrome, blue focus, bundled fonts
 
 The owner asked for the desktop application to look closer to another of their programs. Only a
 written style specification was used; none of that program's code or assets was consulted.
@@ -186,10 +186,13 @@ written style specification was used; none of that program's code or assets was 
 `RengraveApp::new` runs. It also runs from `show` for any context that has not been styled yet,
 because `egui_kittest` draws into a different context than the one given to `new`.
 
-- **Neutral chrome, brand color for focus only.** Panels and widgets are gray. Turquoise marks
+- **Neutral chrome, brand color for focus only.** Panels and widgets are gray. Blue marks
   links, hovered, active, and open widgets, selection, and control labels and section headings.
-  Dark mode uses `#55BBB7` and `#FF6600`; light mode uses darker `#2F6765` and `#B34700` for text
-  contrast.
+  At the owner's request, selected controls use the same blue as the preview's carved area,
+  `rgb(40, 96, 150)` in dark mode and `rgb(150, 190, 230)` in light mode, from one shared constant.
+  Dark mode text uses a lighter tint, `rgb(125, 180, 235)`, because the fill's blue is too dim to
+  read on a dark panel; a test enforces 4.5:1 contrast. Warnings and errors use `#FF6600` in dark
+  mode and `#B34700` in light mode.
 - **Fonts.** Lato Regular leads the proportional family, with egui's fonts behind it as fallbacks.
   Lato Bold is its own family, because `strong()` changes color and not weight. Lucide is another
   family, reached through `icons.rs`. Monospace stays Hack, and text sizes are egui's defaults.

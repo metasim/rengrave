@@ -42,9 +42,9 @@ watchable.
 
 ## Added after the review: Visual style
 
-The interface now uses gray chrome with turquoise reserved for focus (hover, selection, and the
+The interface now uses gray chrome with blue, matching the carved area in the preview, reserved for focus (hover, selection, and the
 labels and headings that name controls), orange for warnings and errors, Lato for text, and Lucide
-icons beside the playback, fit, open, save, copy, and reset commands. Segmented choices and the
+icons beside the playback, fit, open, save, copy, and reset commands. The Design/Toolpath/Output and Preview/Simulate/G-code switches are traditional tabs, connected to the pane below them, which holds each view's tools. Other segmented choices and the
 tab rows share one bordered group, so a row of options reads as a single control. Warnings and
 errors now share a color, so the status bar adds an icon to tell them apart. See D16 in
 [DECISIONS.md](DECISIONS.md).

@@ -784,8 +784,9 @@ impl RengraveApp {
             .default_size(340.0)
             .size_range(280.0..=520.0)
             .show(ui, |ui| self.inspector(ui));
+        let pane_fill = ui.visuals().panel_fill;
         CentralPanel::default()
-            .frame(egui::Frame::NONE)
+            .frame(egui::Frame::NONE.fill(pane_fill))
             .show(ui, |ui| self.main_area(ui));
 
         self.about_window(ui);
@@ -995,33 +996,50 @@ impl RengraveApp {
 
     fn main_area(&mut self, ui: &mut Ui) {
         egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(8, 4))
+            .inner_margin(egui::Margin {
+                left: 8,
+                right: 8,
+                top: 4,
+                bottom: 0,
+            })
             .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.option_group(|ui| {
-                        ui.selectable_value(&mut self.active_view, ActiveView::Preview, "Preview");
-                        ui.selectable_value(
-                            &mut self.active_view,
+                ui.tab_bar(
+                    &mut self.active_view,
+                    &[
+                        (
+                            ActiveView::Preview,
+                            "Preview",
+                            "The design and its toolpath",
+                        ),
+                        (
                             ActiveView::Simulator,
                             "Simulate",
-                        )
-                        .on_hover_text("Play the G-code program and see what it cuts");
-                        ui.selectable_value(&mut self.active_view, ActiveView::Gcode, "G-code");
-                    });
-                    ui.separator();
-                    match self.active_view {
-                        ActiveView::Preview => self.preview_toolbar(ui),
-                        ActiveView::Simulator => {
-                            self.fit_button(ui);
-                            self.simulator.toolbar(ui);
-                        }
-                        ActiveView::Gcode => {
-                            if ui
-                                .icon_button(self.can_write_gcode(), icons::COPY, "Copy")
-                                .clicked()
-                            {
-                                self.copy_gcode();
-                            }
+                            "Play the G-code program and see what it cuts",
+                        ),
+                        (
+                            ActiveView::Gcode,
+                            "G-code",
+                            "The text of the G-code program",
+                        ),
+                    ],
+                );
+            });
+        // The tools belong to the pane, so that the tabs connect to it directly.
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(8, 4))
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| match self.active_view {
+                    ActiveView::Preview => self.preview_toolbar(ui),
+                    ActiveView::Simulator => {
+                        self.fit_button(ui);
+                        self.simulator.toolbar(ui);
+                    }
+                    ActiveView::Gcode => {
+                        if ui
+                            .icon_button(self.can_write_gcode(), icons::COPY, "Copy")
+                            .clicked()
+                        {
+                            self.copy_gcode();
                         }
                     }
                 });

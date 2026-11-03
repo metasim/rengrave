@@ -203,7 +203,10 @@ impl SimulatorView {
                 t.to_screen(ox - half + width, oy - half + height),
             );
             let uv = Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0));
-            canvas.painter.image(texture.id(), rect, uv, Color32::WHITE);
+            // Slightly translucent, so the grid stays readable through the stock.
+            canvas
+                .painter
+                .image(texture.id(), rect, uv, Color32::from_white_alpha(205));
         }
         if self.show_path {
             let shapes = self.path_shapes(&t);
