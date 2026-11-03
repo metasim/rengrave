@@ -414,22 +414,20 @@ impl RengraveApp {
     }
 
     fn position_section(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.label("Work origin")
+                .on_hover_text("Which point of the design is X0 Y0");
             ui.origin_grid(&mut self.settings.origin);
-            ui.vertical(|ui| {
-                ui.label(ui.control_label("Work origin"))
-                    .on_hover_text("Which point of the design is X0 Y0");
-                ui.radio_value(&mut self.settings.origin, Origin::Default, "Design origin")
-                    .on_hover_text("The start of the text baseline, or the origin of the file");
-                if self.settings.input_type == InputType::Text {
-                    ui.radio_value(
-                        &mut self.settings.origin,
-                        Origin::ArcCenter,
-                        "Circle center",
-                    )
-                    .on_hover_text("The center of the circle that text is placed on");
-                }
-            });
+            ui.radio_value(&mut self.settings.origin, Origin::Default, "Design origin")
+                .on_hover_text("The start of the text baseline, or the origin of the file");
+            if self.settings.input_type == InputType::Text {
+                ui.radio_value(
+                    &mut self.settings.origin,
+                    Origin::ArcCenter,
+                    "Circle center",
+                )
+                .on_hover_text("The center of the circle that text is placed on");
+            }
         });
         ui.add_space(4.0);
         let unit = self.unit();
