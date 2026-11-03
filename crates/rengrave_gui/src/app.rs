@@ -893,27 +893,26 @@ impl RengraveApp {
                         ui.close();
                     }
                     ui.separator();
-                    if ui
-                        .menu_item(true, icons::EXPORT, "Export SVG…", None)
-                        .clicked()
-                    {
-                        self.save_svg();
-                        ui.close();
-                    }
-                    if ui
-                        .menu_item(true, icons::EXPORT, "Export DXF…", None)
-                        .clicked()
-                    {
-                        self.save_dxf(false);
-                        ui.close();
-                    }
-                    if ui
-                        .menu_item(true, icons::EXPORT, "Export DXF with closed loops…", None)
-                        .clicked()
-                    {
-                        self.save_dxf(true);
-                        ui.close();
-                    }
+                    let export = ui.menu_button((Look::icon(icons::EXPORT), "Export"), |ui| {
+                        if ui.menu_item(true, icons::EXPORT, "SVG…", None).clicked() {
+                            self.save_svg();
+                            ui.close();
+                        }
+                        if ui.menu_item(true, icons::EXPORT, "DXF…", None).clicked() {
+                            self.save_dxf(false);
+                            ui.close();
+                        }
+                        if ui
+                            .menu_item(true, icons::EXPORT, "DXF with closed loops…", None)
+                            .clicked()
+                        {
+                            self.save_dxf(true);
+                            ui.close();
+                        }
+                    });
+                    export.response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, "Export")
+                    });
                     ui.separator();
                     if ui.menu_item(true, icons::QUIT, "Quit", None).clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);

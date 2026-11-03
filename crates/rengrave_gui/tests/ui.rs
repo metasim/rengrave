@@ -301,7 +301,7 @@ fn panel_layout_is_stable_across_frames() {
 fn all_menus_open() {
     let (mut harness, _) = harness();
     for (menu, item) in [
-        ("File", "Export SVG…"),
+        ("File", "Export"),
         ("View", "Fit design"),
         ("Help", "About Rengrave"),
     ] {
@@ -312,6 +312,16 @@ fn all_menus_open() {
         );
         harness.key_press(Key::Escape);
         harness.run_steps(2);
+    }
+}
+
+#[test]
+fn export_submenu_lists_the_drawing_formats() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "File");
+    click(&mut harness, "Export");
+    for item in ["SVG…", "DXF…", "DXF with closed loops…"] {
+        assert!(harness.query_by_label(item).is_some(), "{item}");
     }
 }
 
