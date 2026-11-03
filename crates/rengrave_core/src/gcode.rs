@@ -25,101 +25,6 @@ enum Fitted {
     },
 }
 
-/// Three-dimensional distance from `p` to the segment `a..b`. With `z_only`, only the Z
-/// component of that displacement counts.
-fn dist_to_segment(a: Xyz, b: Xyz, p: Xyz, z_only: bool) -> f64 {
-    let dx = b[0] - a[0];
-    let dy = b[1] - a[1];
-    let dz = b[2] - a[2];
-    let d2 = dx * dx + dy * dy + dz * dz;
-    if d2 == 0.0 {
-        return 0.0;
-    }
-    let t = ((dx * (p[0] - a[0]) + dy * (p[1] - a[1]) + dz * (p[2] - a[2])) / d2).clamp(0.0, 1.0);
-    let dist2 = if z_only {
-        (p[2] - a[2] - t * dz).powi(2)
-    } else {
-        (p[0] - a[0] - t * dx).powi(2)
-            + (p[1] - a[1] - t * dy).powi(2)
-            + (p[2] - a[2] - t * dz).powi(2)
-    };
-    dist2.powf(0.5)
-}
-
-/// Radius of the XY circle through three points, or `None` if they are nearly collinear.
-fn circle_radius(p1: Xyz, p2: Xyz, p3: Xyz) -> Option<f64> {
-    let (x12, y12) = (p1[0] - p2[0], p1[1] - p2[1]);
-    let (x23, y23) = (p2[0] - p3[0], p2[1] - p3[1]);
-    let (x31, y31) = (p3[0] - p1[0], p3[1] - p1[1]);
-    let den = (x12 * y23 - x23 * y12).abs();
-    if den < 1e-5 {
-        return None;
-    }
-    Some(x12.hypot(y12) * x23.hypot(y23) * x31.hypot(y31) / 2.0 / den)
-}
-
-/// Center of the XY circle through three points, or `None` if they are nearly collinear.
-fn circle_center(p1: Xyz, p2: Xyz, p3: Xyz) -> Option<(f64, f64)> {
-    let sub = |a: Xyz, b: Xyz| (a[0] - b[0], a[1] - b[1]);
-    let dot = |a: (f64, f64), b: (f64, f64)| a.0 * b.0 + a.1 * b.1;
-    let mag2 = |a: (f64, f64)| a.0 * a.0 + a.1 * a.1;
-    let (a12, a23) = (sub(p1, p2), sub(p2, p3));
-    let den = (a12.0 * a23.1 - a12.1 * a23.0).abs();
-    if den < 1e-5 {
-        return None;
-    }
-    let alpha = mag2(sub(p2, p3)) * dot(sub(p1, p2), sub(p1, p3)) / 2.0 / den / den;
-    let beta = mag2(sub(p1, p3)) * dot(sub(p2, p1), sub(p2, p3)) / 2.0 / den / den;
-    let gamma = mag2(sub(p1, p2)) * dot(sub(p3, p1), sub(p3, p2)) / 2.0 / den / den;
-    Some((
-        alpha * p1[0] + beta * p2[0] + gamma * p3[0],
-        alpha * p1[1] + beta * p2[1] + gamma * p3[1],
-    ))
-}
-
-/// Returns `true` if three points on the circle lie in one quadrant, and the turn at the middle
-/// point is gentle enough that an arc is a reasonable fit.
-fn arc_is_fittable(center: (f64, f64), p1: Xyz, p2: Xyz, p3: Xyz) -> bool {
-    let la = (p1[0] - p2[0]).hypot(p1[1] - p2[1]);
-    let lb = (p3[0] - p2[0]).hypot(p3[1] - p2[1]);
-    if la == 0.0 || lb == 0.0 {
-        return false;
-    }
-    let theta_a = angle_from_sin_cos((p1[1] - p2[1]) / la, (p1[0] - p2[0]) / la);
-    let theta_b = angle_from_sin_cos((p3[1] - p2[1]) / lb, (p3[0] - p2[0]) / lb);
-    let angle = (theta_a - theta_b).abs();
-    const TEST_ANGLE: f64 = 36.0;
-    if angle > 180.0 + TEST_ANGLE || angle < 180.0 - TEST_ANGLE {
-        return false;
-    }
-
-    let sign = |v: f64| {
-        if v.abs() < 1e-5 {
-            0
-        } else if v < 0.0 {
-            -1
-        } else {
-            1
-        }
-    };
-    let mut signs: Vec<(i32, i32)> = [p1, p2, p3]
-        .iter()
-        .map(|p| (sign(p[0] - center.0), sign(p[1] - center.1)))
-        .collect();
-    signs.sort_unstable();
-    signs.dedup();
-    if signs.len() == 1 {
-        return true;
-    }
-    // A point on an axis belongs to the neighboring quadrant that is present.
-    for (qx, qy) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
-        if signs.contains(&(qx, qy)) {
-            signs.retain(|&s| s != (qx, 0) && s != (0, qy));
-        }
-    }
-    signs.len() == 1
-}
-
 /// One unit of pending simplification work.
 enum Work {
     Visit { lo: usize, hi: usize, first: bool },
@@ -180,13 +85,13 @@ impl Fitted {
             let mut min_rad = f64::MAX;
             let mut max_arc = 0;
             for (i, &p) in points.iter().enumerate().take(hi).skip(lo + 1) {
-                let dist = dist_to_segment(start, end, p, false);
-                let dist_z = dist_to_segment(start, end, p, true);
+                let dist = Fitted::dist_to_segment(start, end, p, false);
+                let dist_z = Fitted::dist_to_segment(start, end, p, true);
                 if dist > worst_dist {
                     worst = i;
                     worst_dist = dist;
                     if fit_arcs
-                        && let Some(rad) = circle_radius(start, p, end)
+                        && let Some(rad) = Fitted::circle_radius(start, p, end)
                         && rad < min_rad
                     {
                         max_arc = i;
@@ -200,8 +105,8 @@ impl Fitted {
 
             let mut arc: Option<((f64, f64), f64)> = None;
             if min_rad != f64::MAX
-                && let Some(center) = circle_center(start, points[max_arc], end)
-                && arc_is_fittable(center, start, points[max_arc], end)
+                && let Some(center) = Fitted::circle_center(start, points[max_arc], end)
+                && Fitted::arc_is_fittable(center, start, points[max_arc], end)
             {
                 let mut worst_arc = 0.0_f64;
                 for p in &points[lo..=hi] {
@@ -395,26 +300,6 @@ impl Passes {
     }
 }
 
-fn split_lines(text: &str, out: &mut Vec<String>) {
-    out.extend(text.split('|').map(str::to_string));
-}
-
-/// Keeps only word characters, collapsing other runs to single spaces.
-fn sanitized_comment(text: &str) -> String {
-    let mut out = String::new();
-    let mut in_gap = false;
-    for ch in text.chars() {
-        if ch.is_alphanumeric() || ch == '_' {
-            out.push(ch);
-            in_gap = false;
-        } else if !in_gap {
-            out.push(' ');
-            in_gap = true;
-        }
-    }
-    out
-}
-
 /// Assembled output files.
 pub struct GcodeProgram;
 
@@ -431,7 +316,10 @@ impl GcodeProgram {
             if settings.text.chars().count() > MAX_LEN {
                 short.push_str("___");
             }
-            out.push(format!("(Engrave Text:{} )", sanitized_comment(&short)));
+            out.push(format!(
+                "(Engrave Text:{} )",
+                GcodeProgram::sanitized_comment(&short)
+            ));
         }
         out.push("(=========================================================)".to_string());
         out.extend(settings.to_settings_lines());
@@ -536,7 +424,7 @@ impl GcodeProgram {
         }
 
         out.push(format!("G0 Z{safe_val}"));
-        split_lines(&settings.g_post, &mut out);
+        GcodeProgram::split_lines(&settings.g_post, &mut out);
         Ok(out)
     }
 
@@ -549,7 +437,7 @@ impl GcodeProgram {
             crate::settings::Units::Inches => "G20".to_string(),
             crate::settings::Units::Millimeters => "G21".to_string(),
         });
-        split_lines(&settings.g_pre, out);
+        GcodeProgram::split_lines(&settings.g_pre, out);
     }
 
     /// Cuts outlines at constant depth: engraving, and flat-bottomed V-carve regions.
@@ -729,26 +617,12 @@ impl GcodeProgram {
         }
         ends.push(points.len() - 1);
 
-        let mut order = vec![(begins[0], ends[0])];
-        let mut next = 0;
-        for _ in 1..begins.len() {
-            let from = ends.remove(next);
-            begins.remove(next);
-            let cur = points[from];
-            let mut best = f64::INFINITY;
-            next = 0;
-            for (j, &b) in begins.iter().enumerate() {
-                let d = (cur.x - points[b].x).powi(2) + (cur.y - points[b].y).powi(2);
-                if d < best {
-                    best = d;
-                    next = j;
-                }
-            }
-            order.push((begins[next], ends[next]));
-        }
-        order
+        let xy = |i: &usize| (points[*i].x, points[*i].y);
+        let begin_points: Vec<_> = begins.iter().map(xy).collect();
+        let end_points: Vec<_> = ends.iter().map(xy).collect();
+        PathRange::order_by_begin(&begin_points, &end_points)
             .into_iter()
-            .flat_map(|(b, e)| points[b..=e].iter().copied())
+            .flat_map(|k| points[begins[k]..=ends[k]].iter().copied())
             .collect()
     }
 
@@ -854,8 +728,128 @@ impl GcodeProgram {
             }
         }
         out.push(format!("G0 Z{safe_val}"));
-        split_lines(&settings.g_post, &mut out);
+        GcodeProgram::split_lines(&settings.g_post, &mut out);
         Ok(out)
+    }
+}
+
+impl Fitted {
+    /// Three-dimensional distance from `p` to the segment `a..b`. With `z_only`, only the Z
+    /// component of that displacement counts.
+    fn dist_to_segment(a: Xyz, b: Xyz, p: Xyz, z_only: bool) -> f64 {
+        let dx = b[0] - a[0];
+        let dy = b[1] - a[1];
+        let dz = b[2] - a[2];
+        let d2 = dx * dx + dy * dy + dz * dz;
+        if d2 == 0.0 {
+            return 0.0;
+        }
+        let t =
+            ((dx * (p[0] - a[0]) + dy * (p[1] - a[1]) + dz * (p[2] - a[2])) / d2).clamp(0.0, 1.0);
+        let dist2 = if z_only {
+            (p[2] - a[2] - t * dz).powi(2)
+        } else {
+            (p[0] - a[0] - t * dx).powi(2)
+                + (p[1] - a[1] - t * dy).powi(2)
+                + (p[2] - a[2] - t * dz).powi(2)
+        };
+        dist2.powf(0.5)
+    }
+
+    /// Radius of the XY circle through three points, or `None` if they are nearly collinear.
+    fn circle_radius(p1: Xyz, p2: Xyz, p3: Xyz) -> Option<f64> {
+        let (x12, y12) = (p1[0] - p2[0], p1[1] - p2[1]);
+        let (x23, y23) = (p2[0] - p3[0], p2[1] - p3[1]);
+        let (x31, y31) = (p3[0] - p1[0], p3[1] - p1[1]);
+        let den = (x12 * y23 - x23 * y12).abs();
+        if den < 1e-5 {
+            return None;
+        }
+        Some(x12.hypot(y12) * x23.hypot(y23) * x31.hypot(y31) / 2.0 / den)
+    }
+
+    /// Center of the XY circle through three points, or `None` if they are nearly collinear.
+    fn circle_center(p1: Xyz, p2: Xyz, p3: Xyz) -> Option<(f64, f64)> {
+        let sub = |a: Xyz, b: Xyz| (a[0] - b[0], a[1] - b[1]);
+        let dot = |a: (f64, f64), b: (f64, f64)| a.0 * b.0 + a.1 * b.1;
+        let mag2 = |a: (f64, f64)| a.0 * a.0 + a.1 * a.1;
+        let (a12, a23) = (sub(p1, p2), sub(p2, p3));
+        let den = (a12.0 * a23.1 - a12.1 * a23.0).abs();
+        if den < 1e-5 {
+            return None;
+        }
+        let alpha = mag2(sub(p2, p3)) * dot(sub(p1, p2), sub(p1, p3)) / 2.0 / den / den;
+        let beta = mag2(sub(p1, p3)) * dot(sub(p2, p1), sub(p2, p3)) / 2.0 / den / den;
+        let gamma = mag2(sub(p1, p2)) * dot(sub(p3, p1), sub(p3, p2)) / 2.0 / den / den;
+        Some((
+            alpha * p1[0] + beta * p2[0] + gamma * p3[0],
+            alpha * p1[1] + beta * p2[1] + gamma * p3[1],
+        ))
+    }
+
+    /// Returns `true` if three points on the circle lie in one quadrant, and the turn at the middle
+    /// point is gentle enough that an arc is a reasonable fit.
+    fn arc_is_fittable(center: (f64, f64), p1: Xyz, p2: Xyz, p3: Xyz) -> bool {
+        let la = (p1[0] - p2[0]).hypot(p1[1] - p2[1]);
+        let lb = (p3[0] - p2[0]).hypot(p3[1] - p2[1]);
+        if la == 0.0 || lb == 0.0 {
+            return false;
+        }
+        let theta_a = angle_from_sin_cos((p1[1] - p2[1]) / la, (p1[0] - p2[0]) / la);
+        let theta_b = angle_from_sin_cos((p3[1] - p2[1]) / lb, (p3[0] - p2[0]) / lb);
+        let angle = (theta_a - theta_b).abs();
+        const TEST_ANGLE: f64 = 36.0;
+        if angle > 180.0 + TEST_ANGLE || angle < 180.0 - TEST_ANGLE {
+            return false;
+        }
+
+        let sign = |v: f64| {
+            if v.abs() < 1e-5 {
+                0
+            } else if v < 0.0 {
+                -1
+            } else {
+                1
+            }
+        };
+        let mut signs: Vec<(i32, i32)> = [p1, p2, p3]
+            .iter()
+            .map(|p| (sign(p[0] - center.0), sign(p[1] - center.1)))
+            .collect();
+        signs.sort_unstable();
+        signs.dedup();
+        if signs.len() == 1 {
+            return true;
+        }
+        // A point on an axis belongs to the neighboring quadrant that is present.
+        for (qx, qy) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
+            if signs.contains(&(qx, qy)) {
+                signs.retain(|&s| s != (qx, 0) && s != (0, qy));
+            }
+        }
+        signs.len() == 1
+    }
+}
+
+impl GcodeProgram {
+    fn split_lines(text: &str, out: &mut Vec<String>) {
+        out.extend(text.split('|').map(str::to_string));
+    }
+
+    /// Keeps only word characters, collapsing other runs to single spaces.
+    fn sanitized_comment(text: &str) -> String {
+        let mut out = String::new();
+        let mut in_gap = false;
+        for ch in text.chars() {
+            if ch.is_alphanumeric() || ch == '_' {
+                out.push(ch);
+                in_gap = false;
+            } else if !in_gap {
+                out.push(' ');
+                in_gap = true;
+            }
+        }
+        out
     }
 }
 
@@ -875,26 +869,30 @@ mod tests {
     fn distance_to_segment_cases() {
         let a = [0.0, 0.0, 0.0];
         let b = [10.0, 0.0, 0.0];
-        assert_abs_diff_eq!(dist_to_segment(a, b, [5.0, 3.0, 0.0], false), 3.0);
+        assert_abs_diff_eq!(Fitted::dist_to_segment(a, b, [5.0, 3.0, 0.0], false), 3.0);
         assert_abs_diff_eq!(
-            dist_to_segment(a, b, [-3.0, 4.0, 0.0], false),
+            Fitted::dist_to_segment(a, b, [-3.0, 4.0, 0.0], false),
             5.0,
             epsilon = 1e-12
         );
         assert_abs_diff_eq!(
-            dist_to_segment(a, b, [13.0, 4.0, 0.0], false),
+            Fitted::dist_to_segment(a, b, [13.0, 4.0, 0.0], false),
             5.0,
             epsilon = 1e-12
         );
-        assert_eq!(dist_to_segment(a, a, [13.0, 4.0, 0.0], false), 0.0);
-        assert_abs_diff_eq!(dist_to_segment(a, b, [5.0, 3.0, 2.0], true), 2.0);
+        assert_eq!(Fitted::dist_to_segment(a, a, [13.0, 4.0, 0.0], false), 0.0);
+        assert_abs_diff_eq!(Fitted::dist_to_segment(a, b, [5.0, 3.0, 2.0], true), 2.0);
     }
 
     #[test]
     fn circle_through_three_points() {
         let (a, b, c) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]);
-        assert_abs_diff_eq!(circle_radius(a, b, c).unwrap(), 1.0, epsilon = 1e-12);
-        let center = circle_center(a, b, c).unwrap();
+        assert_abs_diff_eq!(
+            Fitted::circle_radius(a, b, c).unwrap(),
+            1.0,
+            epsilon = 1e-12
+        );
+        let center = Fitted::circle_center(a, b, c).unwrap();
         assert_abs_diff_eq!(center.0, 0.0, epsilon = 1e-12);
         assert_abs_diff_eq!(center.1, 0.0, epsilon = 1e-12);
     }
@@ -902,8 +900,8 @@ mod tests {
     #[test]
     fn collinear_points_have_no_circle() {
         let (a, b, c) = ([0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 2.0, 0.0]);
-        assert_eq!(circle_radius(a, b, c), None);
-        assert_eq!(circle_center(a, b, c), None);
+        assert_eq!(Fitted::circle_radius(a, b, c), None);
+        assert_eq!(Fitted::circle_center(a, b, c), None);
     }
 
     #[test]
@@ -939,7 +937,7 @@ mod tests {
         for p in &input {
             let best = kept
                 .windows(2)
-                .map(|w| dist_to_segment(w[0], w[1], *p, false))
+                .map(|w| Fitted::dist_to_segment(w[0], w[1], *p, false))
                 .fold(f64::INFINITY, f64::min);
             assert!(best <= tol + 1e-9, "deviation {best}");
         }
@@ -1009,9 +1007,11 @@ mod tests {
     #[test]
     fn fittability_rejects_sharp_turn() {
         let center = (0.0, 0.0);
-        let sharp = arc_is_fittable(center, [1.0, 0.0, 0.0], [1.1, 0.1, 0.0], [1.0, 0.2, 0.0]);
+        let sharp =
+            Fitted::arc_is_fittable(center, [1.0, 0.0, 0.0], [1.1, 0.1, 0.0], [1.0, 0.2, 0.0]);
         assert!(!sharp);
-        let dup = arc_is_fittable(center, [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.2, 0.0]);
+        let dup =
+            Fitted::arc_is_fittable(center, [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.2, 0.0]);
         assert!(!dup);
     }
 
@@ -1093,7 +1093,10 @@ mod tests {
 
     #[test]
     fn comment_text_is_sanitized() {
-        assert_eq!(sanitized_comment("Hi (there)! a_b\n"), "Hi there a_b ");
+        assert_eq!(
+            GcodeProgram::sanitized_comment("Hi (there)! a_b\n"),
+            "Hi there a_b "
+        );
     }
 
     fn drawing() -> Font {

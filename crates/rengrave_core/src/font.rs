@@ -126,7 +126,7 @@ impl Font {
 
         for raw in text.lines() {
             let line = raw.trim_end_matches('\r');
-            if let Some(header) = cxf_header(line) {
+            if let Some(header) = Font::cxf_header(line) {
                 if let Some(k) = key {
                     font.glyphs.insert(
                         k,
@@ -136,15 +136,15 @@ impl Font {
                     );
                 }
                 strokes.clear();
-                key = cxf_key(header);
+                key = Font::cxf_key(header);
             } else if let Some(rest) = line.strip_prefix("L ") {
-                if let [x1, y1, x2, y2] = parse_floats(rest)[..] {
+                if let [x1, y1, x2, y2] = Font::parse_floats(rest)[..] {
                     strokes.push(Stroke::new(x1, y1, x2, y2));
                 }
             } else if let Some(rest) = line.strip_prefix("A ")
-                && let [xc, yc, r, start, end] = parse_floats(rest)[..]
+                && let [xc, yc, r, start, end] = Font::parse_floats(rest)[..]
             {
-                push_cxf_arc(&mut strokes, xc, yc, r, start, end, seg_arc);
+                Font::push_cxf_arc(&mut strokes, xc, yc, r, start, end, seg_arc);
             }
         }
         if let Some(k) = key {
@@ -198,7 +198,7 @@ impl Font {
                 continue;
             }
             let mut strokes = sink.strokes;
-            normalize_winding(&mut strokes);
+            Font::normalize_winding(&mut strokes);
             for s in &mut strokes {
                 s.x1 *= factor;
                 s.y1 *= factor;
@@ -261,84 +261,6 @@ pub fn extension_upper(path: &Path) -> String {
     path.extension()
         .map(|e| e.to_string_lossy().to_uppercase())
         .unwrap_or_default()
-}
-
-/// Returns the text between the brackets of a `[x]` glyph header line.
-fn cxf_header(line: &str) -> Option<&str> {
-    let inner = line.strip_prefix('[')?;
-    let end = (0..inner.len()).rev().find(|&i| {
-        inner.as_bytes()[i] == b']'
-            && inner[i + 1..]
-                .chars()
-                .next()
-                .is_none_or(char::is_whitespace)
-    })?;
-    Some(&inner[..end])
-}
-
-/// Decodes a glyph header to a code point: a literal character, `0041`, or `#0041`.
-fn cxf_key(header: &str) -> Option<u32> {
-    let mut chars = header.chars();
-    if let (Some(c), None) = (chars.next(), chars.next()) {
-        return Some(c as u32);
-    }
-    let hex = if header.chars().count() == 5 {
-        header.get(header.char_indices().nth(1)?.0..)?
-    } else {
-        header
-    };
-    if hex.len() == 4 {
-        u32::from_str_radix(hex, 16).ok()
-    } else {
-        None
-    }
-}
-
-fn parse_floats(text: &str) -> Vec<f64> {
-    text.split(',')
-        .map(|t| t.trim().parse::<f64>().ok().filter(|v| v.is_finite()))
-        .collect::<Option<_>>()
-        .unwrap_or_default()
-}
-
-fn push_cxf_arc(
-    strokes: &mut Vec<Stroke>,
-    xc: f64,
-    yc: f64,
-    r: f64,
-    mut start: f64,
-    end: f64,
-    seg_arc: f64,
-) {
-    // CXF arcs are counter-clockwise; an end before the start wraps through zero.
-    if end < start {
-        start -= 360.0;
-    }
-    let segs = ((end - start) / seg_arc) as usize + 1;
-    let incr = (end - start) / segs as f64;
-    let mut x0 = start.to_radians().cos() * r + xc;
-    let mut y0 = start.to_radians().sin() * r + yc;
-    let mut angle = start;
-    for _ in 0..segs {
-        angle += incr;
-        let x1 = angle.to_radians().cos() * r + xc;
-        let y1 = angle.to_radians().sin() * r + yc;
-        strokes.push(Stroke::new(x0, y0, x1, y1));
-        x0 = x1;
-        y0 = y1;
-    }
-}
-
-/// Reverses a glyph whose outer contours run counter-clockwise (the CFF convention).
-fn normalize_winding(strokes: &mut [Stroke]) {
-    let doubled_area: f64 = strokes.iter().map(|s| s.x1 * s.y2 - s.x2 * s.y1).sum();
-    if doubled_area > 0.0 {
-        strokes.reverse();
-        for s in strokes.iter_mut() {
-            std::mem::swap(&mut s.x1, &mut s.x2);
-            std::mem::swap(&mut s.y1, &mut s.y2);
-        }
-    }
 }
 
 /// Collects a glyph outline as strokes, flattening curves adaptively.
@@ -448,6 +370,86 @@ impl ttf_parser::OutlineBuilder for OutlineSink {
             ));
         }
         self.cur = self.start;
+    }
+}
+
+impl Font {
+    /// Returns the text between the brackets of a `[x]` glyph header line.
+    fn cxf_header(line: &str) -> Option<&str> {
+        let inner = line.strip_prefix('[')?;
+        let end = (0..inner.len()).rev().find(|&i| {
+            inner.as_bytes()[i] == b']'
+                && inner[i + 1..]
+                    .chars()
+                    .next()
+                    .is_none_or(char::is_whitespace)
+        })?;
+        Some(&inner[..end])
+    }
+
+    /// Decodes a glyph header to a code point: a literal character, `0041`, or `#0041`.
+    fn cxf_key(header: &str) -> Option<u32> {
+        let mut chars = header.chars();
+        if let (Some(c), None) = (chars.next(), chars.next()) {
+            return Some(c as u32);
+        }
+        let hex = if header.chars().count() == 5 {
+            header.get(header.char_indices().nth(1)?.0..)?
+        } else {
+            header
+        };
+        if hex.len() == 4 {
+            u32::from_str_radix(hex, 16).ok()
+        } else {
+            None
+        }
+    }
+
+    fn parse_floats(text: &str) -> Vec<f64> {
+        text.split(',')
+            .map(|t| t.trim().parse::<f64>().ok().filter(|v| v.is_finite()))
+            .collect::<Option<_>>()
+            .unwrap_or_default()
+    }
+
+    fn push_cxf_arc(
+        strokes: &mut Vec<Stroke>,
+        xc: f64,
+        yc: f64,
+        r: f64,
+        mut start: f64,
+        end: f64,
+        seg_arc: f64,
+    ) {
+        // CXF arcs are counter-clockwise; an end before the start wraps through zero.
+        if end < start {
+            start -= 360.0;
+        }
+        let segs = ((end - start) / seg_arc) as usize + 1;
+        let incr = (end - start) / segs as f64;
+        let mut x0 = start.to_radians().cos() * r + xc;
+        let mut y0 = start.to_radians().sin() * r + yc;
+        let mut angle = start;
+        for _ in 0..segs {
+            angle += incr;
+            let x1 = angle.to_radians().cos() * r + xc;
+            let y1 = angle.to_radians().sin() * r + yc;
+            strokes.push(Stroke::new(x0, y0, x1, y1));
+            x0 = x1;
+            y0 = y1;
+        }
+    }
+
+    /// Reverses a glyph whose outer contours run counter-clockwise (the CFF convention).
+    fn normalize_winding(strokes: &mut [Stroke]) {
+        let doubled_area: f64 = strokes.iter().map(|s| s.x1 * s.y2 - s.x2 * s.y1).sum();
+        if doubled_area > 0.0 {
+            strokes.reverse();
+            for s in strokes.iter_mut() {
+                std::mem::swap(&mut s.x1, &mut s.x2);
+                std::mem::swap(&mut s.y1, &mut s.y2);
+            }
+        }
     }
 }
 
@@ -572,7 +574,7 @@ mod tests {
             Stroke::new(0.0, 1.0, 0.0, 0.0),
         ];
         assert!(signed_area(&square) > 0.0);
-        normalize_winding(&mut square);
+        Font::normalize_winding(&mut square);
         assert!(signed_area(&square) < 0.0);
         assert_eq!(square[0], Stroke::new(0.0, 0.0, 0.0, 1.0));
     }

@@ -151,7 +151,7 @@ struct Reader {
 impl DxfDrawing {
     /// Parses DXF text, flattening curves to within `tol_deg` degrees.
     pub fn parse(text: &str, tol_deg: f64) -> Result<Self> {
-        let groups = read_groups(text);
+        let groups = Reader::read_groups(text);
         let mut blocks: BTreeMap<String, Block> = BTreeMap::new();
         let mut entities: Vec<Entity> = Vec::new();
         let mut saw_section = false;
@@ -180,8 +180,8 @@ impl DxfDrawing {
             let section = &groups[start..i];
             i += 1;
             match name {
-                "BLOCKS" => parse_blocks(section, &mut blocks),
-                "ENTITIES" => entities = parse_entities(section),
+                "BLOCKS" => Reader::parse_blocks(section, &mut blocks),
+                "ENTITIES" => entities = Reader::parse_entities(section),
                 _ => {}
             }
         }
@@ -205,102 +205,6 @@ impl DxfDrawing {
     }
 }
 
-/// Splits the file into (group code, value) pairs, skipping anything unreadable.
-fn read_groups(text: &str) -> Vec<(u32, Value)> {
-    let mut groups = Vec::new();
-    let mut lines = text.lines();
-    while let Some(line) = lines.next() {
-        let Ok(code) = line.trim().parse::<i32>() else {
-            continue;
-        };
-        let Some(raw) = lines.next() else { break };
-        // Negative codes are valid in DXF, and name application data that is not needed here.
-        if let Ok(code) = u32::try_from(code)
-            && let Some(value) = Value::parse(code, raw.trim_matches([' ', '\r']))
-        {
-            groups.push((code, value));
-        }
-    }
-    groups
-}
-
-fn parse_blocks(section: &[(u32, Value)], blocks: &mut BTreeMap<String, Block>) {
-    let mut current: Option<(Option<String>, Block, Option<Entity>)> = None;
-    let finish = |current: &mut Option<(Option<String>, Block, Option<Entity>)>,
-                  blocks: &mut BTreeMap<String, Block>| {
-        if let Some((name, mut block, last)) = current.take() {
-            block.entities.extend(last);
-            if let Some(name) = name {
-                blocks.insert(name, block);
-            }
-        }
-    };
-    let mut pending_x = 0.0;
-    for (code, value) in section {
-        match (code, value) {
-            (0, Value::Text(t)) if t == "BLOCK" => {
-                finish(&mut current, blocks);
-                current = Some((None, Block::default(), None));
-                pending_x = 0.0;
-            }
-            (0, Value::Text(t)) if t == "ENDBLK" => finish(&mut current, blocks),
-            (0, Value::Text(t)) => {
-                if let Some((_, block, last)) = &mut current {
-                    block.entities.extend(last.take());
-                    *last = Some(Entity::new(t));
-                }
-            }
-            _ => {
-                let Some((name, block, last)) = &mut current else {
-                    continue;
-                };
-                if let Some(entity) = last {
-                    entity.push(*code, value.clone());
-                    continue;
-                }
-                match (code, value) {
-                    (2, Value::Text(n)) => *name = Some(n.clone()),
-                    (10, Value::Number(x)) => pending_x = *x,
-                    (20, Value::Number(y)) => block.base = (pending_x, *y),
-                    _ => {}
-                }
-            }
-        }
-    }
-    finish(&mut current, blocks);
-}
-
-fn parse_entities(section: &[(u32, Value)]) -> Vec<Entity> {
-    let mut entities: Vec<Entity> = Vec::new();
-    // Whether the current polyline vertex exists and still lacks a bulge.
-    let mut vertex_lacks_bulge = false;
-    for (code, value) in section {
-        match (code, value) {
-            (0, Value::Text(kind)) => {
-                entities.push(Entity::new(kind));
-                vertex_lacks_bulge = false;
-            }
-            _ => {
-                if let Some(entity) = entities.last_mut() {
-                    if entity.kind == "LWPOLYLINE" {
-                        // Keep bulge values aligned with vertices that have none.
-                        if *code == 10 {
-                            if vertex_lacks_bulge {
-                                entity.push(42, Value::Number(0.0));
-                            }
-                            vertex_lacks_bulge = true;
-                        } else if *code == 42 {
-                            vertex_lacks_bulge = false;
-                        }
-                    }
-                    entity.push(*code, value.clone());
-                }
-            }
-        }
-    }
-    entities
-}
-
 impl Reader {
     fn add(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, place: Placement) {
         let (ax, ay) = place.apply(x0, y0);
@@ -312,7 +216,7 @@ impl Reader {
         if bulge == 0.0 {
             self.add(a.0, a.1, b.0, b.1, place);
         } else {
-            for s in bulge_segments(a, b, bulge, self.tol_deg) {
+            for s in Reader::bulge_segments(a, b, bulge, self.tol_deg) {
                 self.add(s.x1, s.y1, s.x2, s.y2, place);
             }
         }
@@ -530,37 +434,6 @@ impl Reader {
     }
 }
 
-/// Flattens a polyline bulge (the tangent of a quarter of the included angle) into segments.
-fn bulge_segments(a: (f64, f64), b: (f64, f64), bulge: f64, tol_deg: f64) -> Vec<Stroke> {
-    let sign = if bulge < 0.0 { 1.0 } else { -1.0 };
-    let bulge = bulge.abs();
-    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-    let c = dx.hypot(dy);
-    if c < ZERO {
-        return vec![Stroke::new(a.0, a.1, b.0, b.1)];
-    }
-    let alpha = 2.0 * bulge.atan();
-    let radius = c / (2.0 * alpha.sin());
-    let l = radius * alpha.cos();
-    let steps = (2.0 * alpha / tol_deg.to_radians()).ceil().max(1.0);
-    let phi = angle_from_sin_cos(dy / c, dx / c).to_radians();
-    let d_theta = 2.0 * alpha / steps;
-    let mut theta = alpha - d_theta;
-    let mut out = Vec::with_capacity(steps as usize);
-    let mut cur = a;
-    for _ in 1..steps as usize {
-        let xp = c / 2.0 - radius * theta.sin();
-        let yp = radius * theta.cos() - l;
-        let p = Point::new(xp, yp * sign).rotated(phi);
-        let next = (p.x + a.0, p.y + a.1);
-        out.push(Stroke::new(cur.0, cur.1, next.0, next.1));
-        cur = next;
-        theta -= d_theta;
-    }
-    out.push(Stroke::new(cur.0, cur.1, b.0, b.1));
-    out
-}
-
 /// A rational B-spline curve in the plane.
 struct Nurbs {
     degree: usize,
@@ -709,6 +582,135 @@ impl Nurbs {
             }
         }
         points
+    }
+}
+
+impl Reader {
+    /// Splits the file into (group code, value) pairs, skipping anything unreadable.
+    fn read_groups(text: &str) -> Vec<(u32, Value)> {
+        let mut groups = Vec::new();
+        let mut lines = text.lines();
+        while let Some(line) = lines.next() {
+            let Ok(code) = line.trim().parse::<i32>() else {
+                continue;
+            };
+            let Some(raw) = lines.next() else { break };
+            // Negative codes are valid in DXF, and name application data that is not needed here.
+            if let Ok(code) = u32::try_from(code)
+                && let Some(value) = Value::parse(code, raw.trim_matches([' ', '\r']))
+            {
+                groups.push((code, value));
+            }
+        }
+        groups
+    }
+
+    fn parse_blocks(section: &[(u32, Value)], blocks: &mut BTreeMap<String, Block>) {
+        let mut current: Option<(Option<String>, Block, Option<Entity>)> = None;
+        let finish = |current: &mut Option<(Option<String>, Block, Option<Entity>)>,
+                      blocks: &mut BTreeMap<String, Block>| {
+            if let Some((name, mut block, last)) = current.take() {
+                block.entities.extend(last);
+                if let Some(name) = name {
+                    blocks.insert(name, block);
+                }
+            }
+        };
+        let mut pending_x = 0.0;
+        for (code, value) in section {
+            match (code, value) {
+                (0, Value::Text(t)) if t == "BLOCK" => {
+                    finish(&mut current, blocks);
+                    current = Some((None, Block::default(), None));
+                    pending_x = 0.0;
+                }
+                (0, Value::Text(t)) if t == "ENDBLK" => finish(&mut current, blocks),
+                (0, Value::Text(t)) => {
+                    if let Some((_, block, last)) = &mut current {
+                        block.entities.extend(last.take());
+                        *last = Some(Entity::new(t));
+                    }
+                }
+                _ => {
+                    let Some((name, block, last)) = &mut current else {
+                        continue;
+                    };
+                    if let Some(entity) = last {
+                        entity.push(*code, value.clone());
+                        continue;
+                    }
+                    match (code, value) {
+                        (2, Value::Text(n)) => *name = Some(n.clone()),
+                        (10, Value::Number(x)) => pending_x = *x,
+                        (20, Value::Number(y)) => block.base = (pending_x, *y),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        finish(&mut current, blocks);
+    }
+
+    fn parse_entities(section: &[(u32, Value)]) -> Vec<Entity> {
+        let mut entities: Vec<Entity> = Vec::new();
+        // Whether the current polyline vertex exists and still lacks a bulge.
+        let mut vertex_lacks_bulge = false;
+        for (code, value) in section {
+            match (code, value) {
+                (0, Value::Text(kind)) => {
+                    entities.push(Entity::new(kind));
+                    vertex_lacks_bulge = false;
+                }
+                _ => {
+                    if let Some(entity) = entities.last_mut() {
+                        if entity.kind == "LWPOLYLINE" {
+                            // Keep bulge values aligned with vertices that have none.
+                            if *code == 10 {
+                                if vertex_lacks_bulge {
+                                    entity.push(42, Value::Number(0.0));
+                                }
+                                vertex_lacks_bulge = true;
+                            } else if *code == 42 {
+                                vertex_lacks_bulge = false;
+                            }
+                        }
+                        entity.push(*code, value.clone());
+                    }
+                }
+            }
+        }
+        entities
+    }
+
+    /// Flattens a polyline bulge (the tangent of a quarter of the included angle) into segments.
+    fn bulge_segments(a: (f64, f64), b: (f64, f64), bulge: f64, tol_deg: f64) -> Vec<Stroke> {
+        let sign = if bulge < 0.0 { 1.0 } else { -1.0 };
+        let bulge = bulge.abs();
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let c = dx.hypot(dy);
+        if c < ZERO {
+            return vec![Stroke::new(a.0, a.1, b.0, b.1)];
+        }
+        let alpha = 2.0 * bulge.atan();
+        let radius = c / (2.0 * alpha.sin());
+        let l = radius * alpha.cos();
+        let steps = (2.0 * alpha / tol_deg.to_radians()).ceil().max(1.0);
+        let phi = angle_from_sin_cos(dy / c, dx / c).to_radians();
+        let d_theta = 2.0 * alpha / steps;
+        let mut theta = alpha - d_theta;
+        let mut out = Vec::with_capacity(steps as usize);
+        let mut cur = a;
+        for _ in 1..steps as usize {
+            let xp = c / 2.0 - radius * theta.sin();
+            let yp = radius * theta.cos() - l;
+            let p = Point::new(xp, yp * sign).rotated(phi);
+            let next = (p.x + a.0, p.y + a.1);
+            out.push(Stroke::new(cur.0, cur.1, next.0, next.1));
+            cur = next;
+            theta -= d_theta;
+        }
+        out.push(Stroke::new(cur.0, cur.1, b.0, b.1));
+        out
     }
 }
 
@@ -1041,7 +1043,7 @@ mod tests {
 
     #[test]
     fn zero_length_bulge_is_a_point() {
-        let s = bulge_segments((1.0, 1.0), (1.0, 1.0), 0.5, 5.0);
+        let s = Reader::bulge_segments((1.0, 1.0), (1.0, 1.0), 0.5, 5.0);
         assert_eq!(s.len(), 1);
     }
 }

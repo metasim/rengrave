@@ -37,102 +37,6 @@ impl Offsetter {
     }
 }
 
-/// Converts sorted segments into one closed polygon per loop.
-fn segments_to_paths(segments: &[Segment]) -> Paths64 {
-    let fixed = |v: f64| (v * SCALE) as i64;
-    let mut out = Paths64::new();
-    let mut current = Path64::new();
-    let mut last_loop = None;
-    for s in segments {
-        if last_loop.is_some() && last_loop != Some(s.line) {
-            out.push(std::mem::take(&mut current));
-        }
-        current.push(Point64::new(fixed(s.x1), fixed(s.y1)));
-        current.push(Point64::new(fixed(s.x2), fixed(s.y2)));
-        last_loop = Some(s.line);
-    }
-    if !current.is_empty() {
-        out.push(current);
-    }
-    out
-}
-
-fn path_point(p: &Point64) -> Point {
-    Point::new(p.x as f64 / SCALE, p.y as f64 / SCALE)
-}
-
-/// Expands polygons into closed perimeter runs, numbering loops after `last_loop`.
-fn paths_to_loops(paths: &Paths64, radius: f64, last_loop: usize) -> Vec<CarvePoint> {
-    let mut out = Vec::new();
-    for (index, path) in paths.iter().enumerate() {
-        let loop_num = last_loop + index + 1;
-        let n = path.len();
-        if n == 0 {
-            continue;
-        }
-        for i in 0..=n {
-            let p = path_point(&path[(i + 2 * n - 2) % n]);
-            out.push(CarvePoint {
-                x: p.x,
-                y: p.y,
-                r: radius,
-                loop_num,
-            });
-        }
-    }
-    out
-}
-
-/// Expands polygons into their edges.
-fn paths_to_edges(paths: &Paths64) -> Vec<Segment> {
-    let mut out = Vec::new();
-    for path in paths {
-        let n = path.len();
-        for i in 0..n {
-            let a = path_point(&path[(i + n - 1) % n]);
-            let b = path_point(&path[i]);
-            out.push(Segment::new(a.x, a.y, b.x, b.y, 0, 0));
-        }
-    }
-    out
-}
-
-/// Sorted intersections of the segment `a..b` with `edges`, as points along it.
-fn line_intersections(a: Point, b: Point, edges: &[Segment]) -> Vec<Point> {
-    const TOL: f64 = 1e-6;
-    let (dx, dy) = (b.x - a.x, b.y - a.y);
-    let len = (dx * dx + dy * dy).sqrt();
-    if len < TOL {
-        return Vec::new();
-    }
-    let (sin, cos) = (dy / len, dx / len);
-    let mut along: Vec<f64> = Vec::new();
-    for e in edges {
-        let xr0 = (e.x1 - a.x) * cos + (e.y1 - a.y) * sin;
-        let yr0 = (e.x1 - a.x) * sin - (e.y1 - a.y) * cos;
-        let xr1 = (e.x2 - a.x) * cos + (e.y2 - a.y) * sin;
-        let yr1 = (e.x2 - a.x) * sin - (e.y2 - a.y) * cos;
-        if yr0.min(yr1) < TOL && yr0.max(yr1) > TOL {
-            let dxr = xr1 - xr0;
-            let hit = if dxr.abs() < TOL {
-                xr0
-            } else {
-                let m = (yr1 - yr0) / dxr;
-                let b_r = yr1 - m * xr1;
-                -b_r / m
-            };
-            if hit > TOL && hit < len - TOL {
-                along.push(hit);
-            }
-        }
-    }
-    along.sort_by(f64::total_cmp);
-    along
-        .into_iter()
-        .map(|t| Point::new(t * cos + a.x, t * sin + a.y))
-        .collect()
-}
-
 /// Which axis raster passes run along.
 #[derive(Clone, Copy, PartialEq)]
 enum Axis {
@@ -174,7 +78,7 @@ impl Raster<'_> {
                         Point::new(at, self.extent.max_y + 1.0),
                     ),
                 };
-                let hits = line_intersections(a, b, self.edges);
+                let hits = CleanupPaths::line_intersections(a, b, self.edges);
                 let mut j = self.skip_edge;
                 while j + 1 + self.skip_edge < hits.len() {
                     let (p1, p2) = (hits[j], hits[j + 1]);
@@ -250,7 +154,7 @@ impl CleanupPaths {
         if clip.is_empty() {
             return Ok(Self::default());
         }
-        let source = Offsetter::new(segments_to_paths(&clip));
+        let source = Offsetter::new(CleanupPaths::segments_to_paths(&clip));
         let rbit = settings.effective_bit_dia() / 2.0;
 
         let (clean_dia, clean_step) = match bit {
@@ -290,8 +194,8 @@ impl CleanupPaths {
             }
         };
 
-        let edges = paths_to_edges(&clean_loops);
-        let perimeter = paths_to_loops(&clean_loops, radius, 0);
+        let edges = CleanupPaths::paths_to_edges(&clean_loops);
+        let perimeter = CleanupPaths::paths_to_loops(&clean_loops, radius, 0);
         let mut extent = crate::geom::Bounds::EMPTY;
         for p in &perimeter {
             extent.include(p.x, p.y);
@@ -328,7 +232,7 @@ impl CleanupPaths {
                 if rings.is_empty() {
                     break;
                 }
-                let ring_points = paths_to_loops(&rings, radius, loop_cnt);
+                let ring_points = CleanupPaths::paths_to_loops(&rings, radius, loop_cnt);
                 if let Some(last) = ring_points.last() {
                     loop_cnt = last.loop_num;
                 }
@@ -342,6 +246,104 @@ impl CleanupPaths {
             raster.cut(Axis::Y, &mut loop_cnt, &mut out);
         }
         Ok(Self { points: out })
+    }
+}
+
+impl CleanupPaths {
+    /// Converts sorted segments into one closed polygon per loop.
+    fn segments_to_paths(segments: &[Segment]) -> Paths64 {
+        let fixed = |v: f64| (v * SCALE) as i64;
+        let mut out = Paths64::new();
+        let mut current = Path64::new();
+        let mut last_loop = None;
+        for s in segments {
+            if last_loop.is_some() && last_loop != Some(s.line) {
+                out.push(std::mem::take(&mut current));
+            }
+            current.push(Point64::new(fixed(s.x1), fixed(s.y1)));
+            current.push(Point64::new(fixed(s.x2), fixed(s.y2)));
+            last_loop = Some(s.line);
+        }
+        if !current.is_empty() {
+            out.push(current);
+        }
+        out
+    }
+
+    fn path_point(p: &Point64) -> Point {
+        Point::new(p.x as f64 / SCALE, p.y as f64 / SCALE)
+    }
+
+    /// Expands polygons into closed perimeter runs, numbering loops after `last_loop`.
+    fn paths_to_loops(paths: &Paths64, radius: f64, last_loop: usize) -> Vec<CarvePoint> {
+        let mut out = Vec::new();
+        for (index, path) in paths.iter().enumerate() {
+            let loop_num = last_loop + index + 1;
+            let n = path.len();
+            if n == 0 {
+                continue;
+            }
+            for i in 0..=n {
+                let p = CleanupPaths::path_point(&path[(i + 2 * n - 2) % n]);
+                out.push(CarvePoint {
+                    x: p.x,
+                    y: p.y,
+                    r: radius,
+                    loop_num,
+                });
+            }
+        }
+        out
+    }
+
+    /// Expands polygons into their edges.
+    fn paths_to_edges(paths: &Paths64) -> Vec<Segment> {
+        let mut out = Vec::new();
+        for path in paths {
+            let n = path.len();
+            for i in 0..n {
+                let a = CleanupPaths::path_point(&path[(i + n - 1) % n]);
+                let b = CleanupPaths::path_point(&path[i]);
+                out.push(Segment::new(a.x, a.y, b.x, b.y, 0, 0));
+            }
+        }
+        out
+    }
+
+    /// Sorted intersections of the segment `a..b` with `edges`, as points along it.
+    fn line_intersections(a: Point, b: Point, edges: &[Segment]) -> Vec<Point> {
+        const TOL: f64 = 1e-6;
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < TOL {
+            return Vec::new();
+        }
+        let (sin, cos) = (dy / len, dx / len);
+        let mut along: Vec<f64> = Vec::new();
+        for e in edges {
+            let xr0 = (e.x1 - a.x) * cos + (e.y1 - a.y) * sin;
+            let yr0 = (e.x1 - a.x) * sin - (e.y1 - a.y) * cos;
+            let xr1 = (e.x2 - a.x) * cos + (e.y2 - a.y) * sin;
+            let yr1 = (e.x2 - a.x) * sin - (e.y2 - a.y) * cos;
+            if yr0.min(yr1) < TOL && yr0.max(yr1) > TOL {
+                let dxr = xr1 - xr0;
+                let hit = if dxr.abs() < TOL {
+                    xr0
+                } else {
+                    let m = (yr1 - yr0) / dxr;
+                    let b_r = yr1 - m * xr1;
+                    -b_r / m
+                };
+                if hit > TOL && hit < len - TOL {
+                    along.push(hit);
+                }
+            }
+        }
+        along.sort_by(f64::total_cmp);
+        along
+            .into_iter()
+            .map(|t| Point::new(t * cos + a.x, t * sin + a.y))
+            .collect()
     }
 }
 
@@ -626,7 +628,8 @@ mod tests {
             Segment::new(2.0, -1.0, 2.0, 1.0, 0, 0),
             Segment::new(8.0, 1.0, 9.0, 2.0, 0, 0),
         ];
-        let hits = line_intersections(Point::new(0.0, 0.0), Point::new(10.0, 0.0), &edges);
+        let hits =
+            CleanupPaths::line_intersections(Point::new(0.0, 0.0), Point::new(10.0, 0.0), &edges);
         assert_eq!(hits.len(), 2);
         assert_abs_diff_eq!(hits[0].x, 2.0, epsilon = 1e-9);
         assert_abs_diff_eq!(hits[1].x, 5.0, epsilon = 1e-9);
@@ -635,7 +638,10 @@ mod tests {
     #[test]
     fn intersection_of_degenerate_line_is_empty() {
         let edges = [Segment::new(0.0, -1.0, 0.0, 1.0, 0, 0)];
-        assert!(line_intersections(Point::new(1.0, 1.0), Point::new(1.0, 1.0), &edges).is_empty());
+        assert!(
+            CleanupPaths::line_intersections(Point::new(1.0, 1.0), Point::new(1.0, 1.0), &edges)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -646,7 +652,7 @@ mod tests {
             Point64::new(10000, 10000),
             Point64::new(0, 10000),
         ];
-        let out = paths_to_loops(&vec![square], 0.1, 5);
+        let out = CleanupPaths::paths_to_loops(&vec![square], 0.1, 5);
         assert_eq!(out.len(), 5);
         assert_eq!(out[0].loop_num, 6);
         assert_eq!((out[0].x, out[0].y), (1.0, 1.0));

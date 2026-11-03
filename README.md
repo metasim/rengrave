@@ -50,7 +50,7 @@ Choose the text and font on the **Design** tab and the bit on the **Toolpath** t
 | Pan | Drag the preview |
 | Zoom | Scroll or pinch; `Page Up` / `Page Down` |
 | Fit design | Double-click the preview; `Ctrl`+`0` |
-| Calculate now | `F5` |
+| Reload the source file and calculate | `F5` |
 | Stop calculating | `Esc` |
 | Save G-code | `Ctrl`+`S` |
 | Copy G-code | `Ctrl`+`G` |

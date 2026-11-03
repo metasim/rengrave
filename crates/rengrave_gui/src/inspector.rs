@@ -1,7 +1,7 @@
 //! The settings panel: all job settings, grouped by the step of the workflow they belong to.
 
 use crate::app::{RengraveApp, StatusLevel, Tab};
-use crate::widgets::{Form, Number, bit_profile, origin_grid, segmented};
+use crate::widgets::{Form, Number, UiExt};
 use egui::{CollapsingHeader, Grid, RichText, Ui};
 use rengrave_core::{
     ArcFit, BitShape, BuiltinFont, CheckScope, CleanupBit, CutType, HeightCalc, InputType, Justify,
@@ -10,14 +10,6 @@ use rengrave_core::{
 
 const PERCENT: &str = " %";
 const DEGREES: &str = "°";
-
-fn form_grid(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
-    Grid::new(id)
-        .num_columns(2)
-        .min_col_width(118.0)
-        .spacing([8.0, 4.0])
-        .show(ui, add);
-}
 
 impl RengraveApp {
     /// Draws the panel: tabs, the active tab's settings, and the primary action.
@@ -94,8 +86,7 @@ impl RengraveApp {
         CollapsingHeader::new("Source")
             .default_open(true)
             .show(ui, |ui| {
-                segmented(
-                    ui,
+                ui.segmented(
                     &mut self.settings.input_type,
                     &[
                         (InputType::Text, "Text", "Engrave text in a font"),
@@ -225,8 +216,7 @@ impl RengraveApp {
     }
 
     fn tracing_section(&mut self, ui: &mut Ui) {
-        segmented(
-            ui,
+        ui.segmented(
             &mut self.settings.tracer,
             &[
                 (Tracer::Native, "Built in", "Trace with the built-in tracer"),
@@ -251,7 +241,7 @@ impl RengraveApp {
             issues: &issues,
             length_unit: "",
         };
-        form_grid(ui, "tracing_grid", |ui| {
+        ui.form_grid("tracing_grid", |ui| {
             form.number(
                 ui,
                 Number {
@@ -308,7 +298,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        form_grid(ui, "size_grid", |ui| {
+        ui.form_grid("size_grid", |ui| {
             form.number(
                 ui,
                 Number {
@@ -384,9 +374,7 @@ impl RengraveApp {
                 );
                 ui.label("Height from")
                     .on_hover_text("Which characters determine the height");
-                segmented(
-                    ui,
-                    &mut s.height_calc,
+                ui.segmented(&mut s.height_calc,
                     &[
                         (
                             HeightCalc::MaxUsed,
@@ -403,9 +391,7 @@ impl RengraveApp {
                 ui.end_row();
                 ui.label("Justify")
                     .on_hover_text("Alignment of multiple lines");
-                segmented(
-                    ui,
-                    &mut s.justify,
+                ui.segmented(&mut s.justify,
                     &[
                         (Justify::Left, "Left", "Align left edges"),
                         (Justify::Center, "Center", "Center each line"),
@@ -419,7 +405,7 @@ impl RengraveApp {
 
     fn position_section(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            origin_grid(ui, &mut self.settings.origin);
+            ui.origin_grid(&mut self.settings.origin);
             ui.vertical(|ui| {
                 ui.label("Work origin")
                     .on_hover_text("Which point of the design is X0 Y0");
@@ -443,7 +429,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        form_grid(ui, "position_grid", |ui| {
+        ui.form_grid("position_grid", |ui| {
             form.length(
                 ui,
                 "X offset",
@@ -500,7 +486,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        form_grid(ui, "circle_grid", |ui| {
+        ui.form_grid("circle_grid", |ui| {
             form.length(
                 ui,
                 "Radius",
@@ -510,8 +496,7 @@ impl RengraveApp {
             );
             ui.label("Side")
                 .on_hover_text("Whether characters stand outside or inside the circle");
-            segmented(
-                ui,
+            ui.segmented(
                 &mut s.outer,
                 &[
                     (true, "Outside", "Text stands outside the circle"),
@@ -521,8 +506,7 @@ impl RengraveApp {
             ui.end_row();
             ui.label("Placement")
                 .on_hover_text("Whether text runs over the top or under the bottom of the circle");
-            segmented(
-                ui,
+            ui.segmented(
                 &mut s.upper,
                 &[
                     (true, "Top", "Text runs over the top"),
@@ -544,8 +528,7 @@ impl RengraveApp {
         CollapsingHeader::new("Cut")
             .default_open(true)
             .show(ui, |ui| {
-                segmented(
-                    ui,
+                ui.segmented(
                     &mut self.settings.cut_type,
                     &[
                         (
@@ -589,7 +572,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        form_grid(ui, "machine_grid", |ui| {
+        ui.form_grid("machine_grid", |ui| {
             form.number(
                 ui,
                 Number {
@@ -632,8 +615,7 @@ impl RengraveApp {
     }
 
     fn bit_section(&mut self, ui: &mut Ui) {
-        segmented(
-            ui,
+        ui.segmented(
             &mut self.settings.bit_shape,
             &[
                 (BitShape::VBit, "V-bit", "A pointed conical bit"),
@@ -645,7 +627,7 @@ impl RengraveApp {
                 ),
             ],
         );
-        bit_profile(ui, &self.settings);
+        ui.bit_profile(&self.settings);
         let unit = self.unit();
         let issues = self.issues.clone();
         let mut form = Form {
@@ -653,7 +635,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        form_grid(ui, "bit_grid", |ui| {
+        ui.form_grid("bit_grid", |ui| {
             if s.bit_shape == BitShape::VBit {
                 form.number(
                     ui,
@@ -697,7 +679,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        form_grid(ui, "multipass_grid", |ui| {
+        ui.form_grid("multipass_grid", |ui| {
             form.length(
                 ui,
                 "Finish stock",
@@ -728,7 +710,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        form_grid(ui, "inlay_grid", |ui| {
+        ui.form_grid("inlay_grid", |ui| {
             form.check(
                 ui,
                 "Prismatic cut",
@@ -759,7 +741,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        form_grid(ui, "advanced_grid", |ui| {
+        ui.form_grid("advanced_grid", |ui| {
             form.length(
                 ui,
                 "Step length",
@@ -791,8 +773,7 @@ impl RengraveApp {
             );
             ui.label("Limit by")
                 .on_hover_text("Which outlines limit the cut at each point");
-            segmented(
-                ui,
+            ui.segmented(
                 &mut s.v_check_scope,
                 &[
                     (CheckScope::All, "All", "The whole design"),
@@ -816,7 +797,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        form_grid(ui, "cleanup_grid", |ui| {
+        ui.form_grid("cleanup_grid", |ui| {
             form.length(
                 ui,
                 "Straight bit",
@@ -917,10 +898,9 @@ impl RengraveApp {
                     length_unit: unit,
                 };
                 let s = &mut self.settings;
-                form_grid(ui, "format_grid", |ui| {
+                ui.form_grid("format_grid", |ui| {
                     ui.label("Arcs").on_hover_text("How curves are written");
-                    segmented(
-                        ui,
+                    ui.segmented(
                         &mut s.arc_fit,
                         &[
                             (

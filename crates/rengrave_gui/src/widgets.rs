@@ -87,157 +87,191 @@ impl Form<'_> {
     }
 }
 
-/// A row of mutually exclusive buttons. Returns `true` if the choice changed.
-pub fn segmented<T: Copy + PartialEq>(
-    ui: &mut Ui,
-    value: &mut T,
-    choices: &[(T, &str, &str)],
-) -> bool {
-    let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        for &(choice, name, tip) in choices {
-            if ui
-                .selectable_label(*value == choice, name)
-                .on_hover_text(tip)
-                .clicked()
-                && *value != choice
-            {
-                *value = choice;
-                changed = true;
-            }
-        }
-    });
-    changed
+/// Composite controls for the settings panel.
+pub trait UiExt {
+    /// A row of mutually exclusive buttons. Returns `true` if the choice changed.
+    fn segmented<T: Copy + PartialEq>(
+        &mut self,
+        value: &mut T,
+        choices: &[(T, &str, &str)],
+    ) -> bool;
+
+    /// A 3-by-3 grid of dots for choosing the work origin relative to the design's bounding box.
+    fn origin_grid(&mut self, value: &mut Origin) -> bool;
+
+    /// Draws a cross-section of the tool at its full cutting depth.
+    fn bit_profile(&mut self, settings: &Settings);
+
+    /// Lays out a two-column form with a consistent label width.
+    fn form_grid(&mut self, id: &str, add: impl FnOnce(&mut Ui));
 }
 
-/// A 3-by-3 grid of dots for choosing the work origin relative to the design's bounding box.
-pub fn origin_grid(ui: &mut Ui, value: &mut Origin) -> bool {
-    const ROWS: [[(Origin, &str); 3]; 3] = [
-        [
-            (Origin::TopLeft, "Top left"),
-            (Origin::TopCenter, "Top center"),
-            (Origin::TopRight, "Top right"),
-        ],
-        [
-            (Origin::MidLeft, "Middle left"),
-            (Origin::MidCenter, "Middle center"),
-            (Origin::MidRight, "Middle right"),
-        ],
-        [
-            (Origin::BotLeft, "Bottom left"),
-            (Origin::BotCenter, "Bottom center"),
-            (Origin::BotRight, "Bottom right"),
-        ],
-    ];
-    const CELL: f32 = 22.0;
-    let mut changed = false;
-    egui::Grid::new("origin_grid")
-        .spacing(vec2(0.0, 0.0))
-        .min_col_width(CELL)
-        .min_row_height(CELL)
-        .show(ui, |ui| {
-            for row in ROWS {
-                for (origin, name) in row {
-                    let (rect, response) = ui.allocate_exact_size(vec2(CELL, CELL), Sense::click());
-                    let selected = *value == origin;
-                    response.widget_info(|| {
-                        egui::WidgetInfo::selected(egui::Role::RadioButton, true, selected, name)
-                    });
-                    let response =
-                        response.on_hover_text(format!("Origin at the {}", name.to_lowercase()));
-                    if response.clicked() && !selected {
-                        *value = origin;
-                        changed = true;
-                    }
-                    let visuals = ui.style().interact_selectable(&response, selected);
-                    ui.painter().rect_stroke(
-                        rect.shrink(1.0),
-                        1.0,
-                        Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
-                        egui::StrokeKind::Inside,
-                    );
-                    let radius = if selected { 5.0 } else { 3.0 };
-                    let color = if selected {
-                        ui.visuals().selection.bg_fill
-                    } else {
-                        visuals.fg_stroke.color
-                    };
-                    ui.painter().circle_filled(rect.center(), radius, color);
+impl UiExt for Ui {
+    fn segmented<T: Copy + PartialEq>(
+        &mut self,
+        value: &mut T,
+        choices: &[(T, &str, &str)],
+    ) -> bool {
+        let mut changed = false;
+        self.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            for &(choice, name, tip) in choices {
+                if ui
+                    .selectable_label(*value == choice, name)
+                    .on_hover_text(tip)
+                    .clicked()
+                    && *value != choice
+                {
+                    *value = choice;
+                    changed = true;
                 }
-                ui.end_row();
             }
         });
-    changed
-}
-
-/// Draws a cross-section of the tool at its full cutting depth.
-pub fn bit_profile(ui: &mut Ui, settings: &Settings) {
-    let (rect, _) =
-        ui.allocate_exact_size(vec2(ui.available_width().min(220.0), 72.0), Sense::hover());
-    let painter = ui.painter_at(rect);
-    let stroke = Stroke::new(1.5, ui.visuals().strong_text_color());
-    let surface = rect.top() + 22.0;
-    painter.line_segment(
-        [pos2(rect.left(), surface), pos2(rect.right(), surface)],
-        Stroke::new(1.0, ui.visuals().weak_text_color()),
-    );
-
-    let cx = rect.center().x;
-    let depth = (-settings.max_cut_depth()).max(1e-9) as f32;
-    let radius = (settings.effective_bit_dia() / 2.0).max(1e-9) as f32;
-    let scale = (46.0 / depth).min(60.0 / radius);
-    let (d, r) = (depth * scale, radius * scale);
-    if !d.is_finite() || !r.is_finite() {
-        return;
+        changed
     }
-    let tip = pos2(cx, surface + d);
-    let cut_fill = Color32::from_rgba_unmultiplied(120, 170, 220, 90);
-    match settings.bit_shape {
-        BitShape::VBit => {
-            let left = pos2(cx - r, surface);
-            let right = pos2(cx + r, surface);
-            painter.add(egui::Shape::convex_polygon(
-                vec![left, right, tip],
-                cut_fill,
-                Stroke::NONE,
-            ));
-            painter.line(
-                vec![
-                    pos2(left.x, rect.top()),
-                    left,
-                    tip,
-                    right,
-                    pos2(right.x, rect.top()),
-                ],
-                stroke,
-            );
+
+    fn origin_grid(&mut self, value: &mut Origin) -> bool {
+        const ROWS: [[(Origin, &str); 3]; 3] = [
+            [
+                (Origin::TopLeft, "Top left"),
+                (Origin::TopCenter, "Top center"),
+                (Origin::TopRight, "Top right"),
+            ],
+            [
+                (Origin::MidLeft, "Middle left"),
+                (Origin::MidCenter, "Middle center"),
+                (Origin::MidRight, "Middle right"),
+            ],
+            [
+                (Origin::BotLeft, "Bottom left"),
+                (Origin::BotCenter, "Bottom center"),
+                (Origin::BotRight, "Bottom right"),
+            ],
+        ];
+        const CELL: f32 = 22.0;
+        let mut changed = false;
+        egui::Grid::new("origin_grid")
+            .spacing(vec2(0.0, 0.0))
+            .min_col_width(CELL)
+            .min_row_height(CELL)
+            .show(self, |ui| {
+                for row in ROWS {
+                    for (origin, name) in row {
+                        let (rect, response) =
+                            ui.allocate_exact_size(vec2(CELL, CELL), Sense::click());
+                        let selected = *value == origin;
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::Role::RadioButton,
+                                true,
+                                selected,
+                                name,
+                            )
+                        });
+                        let response = response
+                            .on_hover_text(format!("Origin at the {}", name.to_lowercase()));
+                        if response.clicked() && !selected {
+                            *value = origin;
+                            changed = true;
+                        }
+                        let visuals = ui.style().interact_selectable(&response, selected);
+                        ui.painter().rect_stroke(
+                            rect.shrink(1.0),
+                            1.0,
+                            Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                            egui::StrokeKind::Inside,
+                        );
+                        let radius = if selected { 5.0 } else { 3.0 };
+                        let color = if selected {
+                            ui.visuals().selection.bg_fill
+                        } else {
+                            visuals.fg_stroke.color
+                        };
+                        ui.painter().circle_filled(rect.center(), radius, color);
+                    }
+                    ui.end_row();
+                }
+            });
+        changed
+    }
+
+    fn bit_profile(&mut self, settings: &Settings) {
+        let (rect, _) = self.allocate_exact_size(
+            vec2(self.available_width().min(220.0), 72.0),
+            Sense::hover(),
+        );
+        let painter = self.painter_at(rect);
+        let stroke = Stroke::new(1.5, self.visuals().strong_text_color());
+        let surface = rect.top() + 22.0;
+        painter.line_segment(
+            [pos2(rect.left(), surface), pos2(rect.right(), surface)],
+            Stroke::new(1.0, self.visuals().weak_text_color()),
+        );
+
+        let cx = rect.center().x;
+        let depth = (-settings.max_cut_depth()).max(1e-9) as f32;
+        let radius = (settings.effective_bit_dia() / 2.0).max(1e-9) as f32;
+        let scale = (46.0 / depth).min(60.0 / radius);
+        let (d, r) = (depth * scale, radius * scale);
+        if !d.is_finite() || !r.is_finite() {
+            return;
         }
-        BitShape::Ball => {
-            let n = 24;
-            let full_radius = (settings.v_bit_dia / 2.0) as f32 * scale;
-            let center_y = tip.y - full_radius;
-            let mut pts = vec![pos2(cx - full_radius, rect.top())];
-            for i in 0..=n {
-                let a = std::f32::consts::PI * i as f32 / n as f32;
-                pts.push(pos2(
-                    cx - full_radius * a.cos(),
-                    center_y + full_radius * a.sin(),
+        let tip = pos2(cx, surface + d);
+        let cut_fill = Color32::from_rgba_unmultiplied(120, 170, 220, 90);
+        match settings.bit_shape {
+            BitShape::VBit => {
+                let left = pos2(cx - r, surface);
+                let right = pos2(cx + r, surface);
+                painter.add(egui::Shape::convex_polygon(
+                    vec![left, right, tip],
+                    cut_fill,
+                    Stroke::NONE,
                 ));
+                painter.line(
+                    vec![
+                        pos2(left.x, rect.top()),
+                        left,
+                        tip,
+                        right,
+                        pos2(right.x, rect.top()),
+                    ],
+                    stroke,
+                );
             }
-            pts.push(pos2(cx + full_radius, rect.top()));
-            painter.line(pts, stroke);
+            BitShape::Ball => {
+                let n = 24;
+                let full_radius = (settings.v_bit_dia / 2.0) as f32 * scale;
+                let center_y = tip.y - full_radius;
+                let mut pts = vec![pos2(cx - full_radius, rect.top())];
+                for i in 0..=n {
+                    let a = std::f32::consts::PI * i as f32 / n as f32;
+                    pts.push(pos2(
+                        cx - full_radius * a.cos(),
+                        center_y + full_radius * a.sin(),
+                    ));
+                }
+                pts.push(pos2(cx + full_radius, rect.top()));
+                painter.line(pts, stroke);
+            }
+            BitShape::Flat => {
+                painter.line(
+                    vec![
+                        pos2(cx - r, rect.top()),
+                        pos2(cx - r, tip.y),
+                        pos2(cx + r, tip.y),
+                        pos2(cx + r, rect.top()),
+                    ],
+                    stroke,
+                );
+            }
         }
-        BitShape::Flat => {
-            painter.line(
-                vec![
-                    pos2(cx - r, rect.top()),
-                    pos2(cx - r, tip.y),
-                    pos2(cx + r, tip.y),
-                    pos2(cx + r, rect.top()),
-                ],
-                stroke,
-            );
-        }
+    }
+
+    fn form_grid(&mut self, id: &str, add: impl FnOnce(&mut Ui)) {
+        egui::Grid::new(id)
+            .num_columns(2)
+            .min_col_width(118.0)
+            .spacing([8.0, 4.0])
+            .show(self, add);
     }
 }
