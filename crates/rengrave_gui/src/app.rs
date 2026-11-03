@@ -25,6 +25,7 @@ const DEBOUNCE_SECONDS: f64 = 0.12;
 
 const SAVE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
 const COPY_GCODE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::G);
+const NEW: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
 const OPEN: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::O);
 const FIT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Num0);
 
@@ -167,19 +168,34 @@ pub struct RengraveApp {
 }
 
 impl RengraveApp {
+    /// The settings of a new job.
+    fn default_settings() -> Settings {
+        Settings {
+            cut_type: CutType::VCarve,
+            text: "rengrave".into(),
+            y_scale: 1.0,
+            v_step_len: 0.01,
+            ..Settings::default()
+        }
+    }
+
+    /// Starts over with the default settings, discarding the current job.
+    pub fn new_job(&mut self) {
+        self.settings = Self::default_settings();
+        self.preview.fit();
+        self.notify(
+            StatusLevel::Info,
+            "Started a new job with the default settings",
+        );
+    }
+
     /// Creates the application, using `dialogs` to ask for files.
     pub fn new(ctx: egui::Context, dialogs: Box<dyn FileDialogs>) -> Self {
         Look::install(&ctx);
         let notify = ctx.clone();
         Self {
             ctx,
-            settings: Settings {
-                cut_type: CutType::VCarve,
-                text: "rengrave".into(),
-                y_scale: 1.0,
-                v_step_len: 0.01,
-                ..Settings::default()
-            },
+            settings: Self::default_settings(),
             issues: Vec::new(),
             dialogs,
             worker: Worker::spawn(move || notify.request_repaint()),
@@ -749,6 +765,9 @@ impl RengraveApp {
         if ctx.input_mut(|i| i.consume_shortcut(&COPY_GCODE)) {
             self.copy_gcode();
         }
+        if ctx.input_mut(|i| i.consume_shortcut(&NEW)) {
+            self.new_job();
+        }
         if ctx.input_mut(|i| i.consume_shortcut(&OPEN)) {
             self.open_image_dialog();
         }
@@ -817,6 +836,18 @@ impl RengraveApp {
             .config(egui::containers::menu::MenuConfig::new().style(Look::menu_style))
             .ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
+                    if ui
+                        .menu_item(
+                            true,
+                            icons::NEW,
+                            "New",
+                            Some(ui.ctx().format_shortcut(&NEW)),
+                        )
+                        .clicked()
+                    {
+                        self.new_job();
+                        ui.close();
+                    }
                     if ui
                         .menu_item(
                             true,

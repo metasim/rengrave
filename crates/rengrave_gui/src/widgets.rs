@@ -495,6 +495,19 @@ impl UiExt for Ui {
             return;
         }
         let tip = pos2(cx, surface + d);
+        // Hatch marks under the surface line show the material, as in a mechanical drawing.
+        let opening = match settings.bit_shape {
+            BitShape::Ball => (settings.v_bit_dia / 2.0) as f32 * scale,
+            _ => r,
+        };
+        let hatch = Stroke::new(1.0, self.visuals().weak_text_color());
+        let mut x = rect.left() + 4.0;
+        while x < rect.right() {
+            if (x - cx).abs() > opening + 1.0 {
+                painter.line_segment([pos2(x, surface), pos2(x - 6.0, surface + 6.0)], hatch);
+            }
+            x += 7.0;
+        }
         let cut_fill = Color32::from_rgba_unmultiplied(120, 170, 220, 90);
         match settings.bit_shape {
             BitShape::VBit => {
@@ -529,9 +542,20 @@ impl UiExt for Ui {
                     ));
                 }
                 pts.push(pos2(cx + full_radius, rect.top()));
+                // The carved area is the part of the bit below the surface.
+                let carved = pts[1..=n + 1]
+                    .iter()
+                    .map(|p| pos2(p.x, p.y.max(surface)))
+                    .collect();
+                painter.add(egui::Shape::convex_polygon(carved, cut_fill, Stroke::NONE));
                 painter.line(pts, stroke);
             }
             BitShape::Flat => {
+                painter.rect_filled(
+                    egui::Rect::from_min_max(pos2(cx - r, surface), pos2(cx + r, tip.y)),
+                    0.0,
+                    cut_fill,
+                );
                 painter.line(
                     vec![
                         pos2(cx - r, rect.top()),
