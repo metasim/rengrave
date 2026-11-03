@@ -7,6 +7,7 @@
 
 mod app;
 pub mod dialogs;
+mod gcode_view;
 mod inspector;
 pub mod preview;
 mod widgets;
