@@ -3,6 +3,7 @@
 
 //! Small reusable pieces of the settings panel.
 
+use crate::style::Look;
 use egui::{Color32, DragValue, Response, RichText, Sense, Stroke, Ui, pos2, vec2};
 use rengrave_core::{BitShape, Issue, Origin, Settings};
 
@@ -33,20 +34,21 @@ impl Form<'_> {
     /// Adds a numeric row.
     pub fn number(&mut self, ui: &mut Ui, spec: Number<'_>, value: &mut f64) -> Response {
         let issue = self.issues.iter().find(|i| i.field == spec.field);
-        let text = RichText::new(spec.label);
         let text = if issue.is_some() {
-            text.color(ui.visuals().error_fg_color)
+            RichText::new(spec.label).color(ui.visuals().error_fg_color)
         } else {
-            text
+            ui.control_label(spec.label)
         };
         let label = ui.label(text).on_hover_text(spec.tip);
         let response = ui
-            .add(
-                DragValue::new(value)
-                    .speed(spec.speed)
-                    .suffix(spec.suffix.to_string())
-                    .max_decimals(5),
-            )
+            .compact(|ui| {
+                ui.add(
+                    DragValue::new(value)
+                        .speed(spec.speed)
+                        .suffix(spec.suffix.to_string())
+                        .max_decimals(5),
+                )
+            })
             .labelled_by(label.id)
             .on_hover_text(issue.map_or(spec.tip, |i| i.message));
         ui.end_row();
@@ -85,13 +87,39 @@ impl Form<'_> {
     /// Adds a checkbox row.
     pub fn check(&mut self, ui: &mut Ui, label: &str, tip: &str, value: &mut bool) {
         ui.label("");
-        ui.checkbox(value, label).on_hover_text(tip);
+        ui.compact(|ui| ui.checkbox(value, label))
+            .on_hover_text(tip);
         ui.end_row();
     }
 }
 
 /// Composite controls for the settings panel.
 pub trait UiExt {
+    /// Runs `add` with the dense padding and rounding used by sliders, drag values, checkboxes,
+    /// and segmented pills.
+    fn compact<R>(&mut self, add: impl FnOnce(&mut Ui) -> R) -> R;
+
+    /// Wraps a row of options in one bordered, rounded frame.
+    fn option_group(&mut self, add: impl FnOnce(&mut Ui));
+
+    /// Text for a label that names a control, in the accent color.
+    fn control_label(&self, text: impl Into<String>) -> RichText;
+
+    /// Text for a section heading: bold, in the accent color.
+    fn section_heading(&self, text: impl Into<String>) -> RichText;
+
+    /// A button with an icon before its text. Its accessible name is the text alone.
+    fn icon_button(&mut self, enabled: bool, icon: char, text: &str) -> Response;
+
+    /// A menu entry with an icon, and optionally the text of its keyboard shortcut.
+    fn menu_item(
+        &mut self,
+        enabled: bool,
+        icon: char,
+        text: &str,
+        shortcut: Option<String>,
+    ) -> Response;
+
     /// A row of mutually exclusive buttons. Returns `true` if the choice changed.
     fn segmented<T: Copy + PartialEq>(
         &mut self,
@@ -113,14 +141,79 @@ pub trait UiExt {
 }
 
 impl UiExt for Ui {
+    fn compact<R>(&mut self, add: impl FnOnce(&mut Ui) -> R) -> R {
+        self.scope(|ui| {
+            Look::compact_control_style(ui.style_mut());
+            add(ui)
+        })
+        .inner
+    }
+
+    fn option_group(&mut self, add: impl FnOnce(&mut Ui)) {
+        let stroke = self.visuals().widgets.noninteractive.bg_stroke;
+        egui::Frame::new()
+            .stroke(stroke)
+            .corner_radius(egui::CornerRadius::same(6))
+            .inner_margin(egui::Margin::same(2))
+            .show(self, |ui| {
+                ui.horizontal(|ui| {
+                    Look::compact_control_style(ui.style_mut());
+                    let style = ui.style_mut();
+                    style.spacing.item_spacing.x = 2.0;
+                    // Options sit flat in the frame until pointed at.
+                    let rest = &mut style.visuals.widgets.inactive;
+                    rest.weak_bg_fill = Color32::TRANSPARENT;
+                    rest.bg_stroke = Stroke::new(1.0, Color32::TRANSPARENT);
+                    add(ui);
+                });
+            });
+    }
+
+    fn control_label(&self, text: impl Into<String>) -> RichText {
+        RichText::new(text).color(self.visuals().hyperlink_color)
+    }
+
+    fn section_heading(&self, text: impl Into<String>) -> RichText {
+        Look::bold(text).color(self.visuals().hyperlink_color)
+    }
+
+    fn icon_button(&mut self, enabled: bool, icon: char, text: &str) -> Response {
+        let button = egui::Button::new((Look::icon(icon), text));
+        let response = self.add_enabled(enabled, button);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, text));
+        response
+    }
+
+    fn menu_item(
+        &mut self,
+        enabled: bool,
+        icon: char,
+        text: &str,
+        shortcut: Option<String>,
+    ) -> Response {
+        let mut button = egui::Button::new((Look::icon(icon), text));
+        // The accessible name includes the shortcut, as it does for any text in the button.
+        let mut name = text.to_owned();
+        if let Some(shortcut) = shortcut {
+            name = format!("{text} {shortcut}");
+            button = button.shortcut_text(shortcut);
+        }
+        let response = self.add_enabled(enabled, button);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, &name));
+        response
+    }
+
     fn resettable_text(&mut self, name: &str, tip: &str, value: &mut String, default: &str) {
         let label = self
             .horizontal(|ui| {
-                let label = ui.label(name).on_hover_text(tip);
+                let label = ui.label(ui.control_label(name)).on_hover_text(tip);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let differs = value != default;
                     let reset = ui
-                        .add_enabled(differs, egui::Button::new("Reset").small())
+                        .add_enabled(
+                            differs,
+                            egui::Button::new((Look::icon(crate::icons::RESET), "Reset")).small(),
+                        )
                         .on_hover_text(format!("Restore the default: {default}"));
                     reset.widget_info(|| {
                         egui::WidgetInfo::labeled(
@@ -146,8 +239,7 @@ impl UiExt for Ui {
         choices: &[(T, &str, &str)],
     ) -> bool {
         let mut changed = false;
-        self.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
+        self.option_group(|ui| {
             for &(choice, name, tip) in choices {
                 if ui
                     .selectable_label(*value == choice, name)

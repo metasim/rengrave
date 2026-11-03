@@ -48,6 +48,19 @@ unmodified copies, kept under their own license as a collective. See
 source files carry no headers because they are kept byte-identical to upstream; `REUSE.toml` covers
 them. MIT is compatible with distributing the whole under the GPL.
 
+## Fonts bundled in the desktop application
+
+These files in `crates/rengrave_gui/assets/fonts/` are embedded unmodified in the `rengrave-gui`
+binary. They are separate works under their own licenses, kept with their license texts. Both
+licenses permit bundling with a GPL program.
+
+| File | License | Copyright | Source |
+| --- | --- | --- | --- |
+| `Lato-Regular.ttf`, `Lato-Bold.ttf` | OFL-1.1 ([`LICENSES/OFL-1.1.txt`](LICENSES/OFL-1.1.txt)) | 2011-2015 tyPoland Lukasz Dziedzic, Reserved Font Name "Lato" | Lato Version 2.015 (2015-08-06), read from the fonts' own name tables. The files' SHA-256 matches those fetched from the `ofl/lato` directory of [google/fonts](https://github.com/google/fonts) at commit `5d3b76120a319730fda218cc7410174a462b32cb`. Text in `Lato-OFL.txt`, which gives the years as 2010-2014; the fonts say 2011-2015. |
+| `Lucide.ttf` | ISC ([`LICENSES/ISC.txt`](LICENSES/ISC.txt)), and MIT ([`LICENSES/MIT.txt`](LICENSES/MIT.txt)) for the icons Lucide derived from Feather | 2026 Lucide Icons and Contributors; 2013-present Cole Bemis (Feather) | Identical (SHA-256) to `font/lucide.ttf` in `lucide-static` 1.67.0 on npm; the font's own version field says only "1.0". Text in `Lucide-LICENSE.txt`. |
+
+The Reserved Font Name condition applies to modified versions, and the fonts are not modified.
+
 ## Used but not copied
 
 - **`ttf2cxf_stream`:** F-Engrave's C++ TrueType helper, based on RibbonSoft's ttf2cxf, is licensed

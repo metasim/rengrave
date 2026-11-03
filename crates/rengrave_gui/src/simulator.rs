@@ -3,7 +3,9 @@
 
 //! The toolpath simulator view: plays the G-code program and shows the carved stock.
 
+use crate::icons;
 use crate::preview::{Preview, ViewTransform};
+use crate::widgets::UiExt;
 use egui::{Color32, ColorImage, Pos2, Rect, RichText, Stroke, TextureHandle, TextureOptions, Ui};
 use rengrave_core::simulate::{CellRect, SimMove};
 use rengrave_core::{CarvePoint, Design, Settings, Simulation};
@@ -130,22 +132,26 @@ impl SimulatorView {
     pub(crate) fn toolbar(&mut self, ui: &mut Ui) {
         let total = self.sim.as_ref().map_or(0.0, Simulation::total_seconds);
         let ready = self.sim.is_some();
-        let label = if self.playing { "Pause" } else { "Play" };
-        if ui.add_enabled(ready, egui::Button::new(label)).clicked() {
+        let (icon, label) = if self.playing {
+            (icons::PAUSE, "Pause")
+        } else {
+            (icons::PLAY, "Play")
+        };
+        if ui.icon_button(ready, icon, label).clicked() {
             self.playing = !self.playing;
             if self.playing && self.target >= total {
                 self.target = 0.0;
             }
         }
         if ui
-            .add_enabled(ready, egui::Button::new("Restart"))
+            .icon_button(ready, icons::RESTART, "Restart")
             .on_hover_text("Go back to the start of the program")
             .clicked()
         {
             self.target = 0.0;
         }
         if ui
-            .add_enabled(ready, egui::Button::new("Finish"))
+            .icon_button(ready, icons::FINISH, "Finish")
             .on_hover_text("Jump to the finished result")
             .clicked()
         {
@@ -153,12 +159,12 @@ impl SimulatorView {
             self.playing = false;
         }
         ui.separator();
-        ui.spacing_mut().item_spacing.x = 2.0;
-        for speed in SPEEDS {
-            ui.selectable_value(&mut self.speed, speed, format!("{speed:.0}×"))
-                .on_hover_text("Playback speed, as a multiple of the estimated run time");
-        }
-        ui.spacing_mut().item_spacing.x = 8.0;
+        ui.option_group(|ui| {
+            for speed in SPEEDS {
+                ui.selectable_value(&mut self.speed, speed, format!("{speed:.0}×"))
+                    .on_hover_text("Playback speed, as a multiple of the estimated run time");
+            }
+        });
         ui.separator();
         ui.toggle_value(&mut self.show_path, "Path")
             .on_hover_text("Show the whole tool path: cuts and rapid moves");

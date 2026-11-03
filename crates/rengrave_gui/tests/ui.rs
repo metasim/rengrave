@@ -105,6 +105,20 @@ fn settle(harness: &mut Harness<'_, RengraveApp>) {
 }
 
 fn click(harness: &mut Harness<'_, RengraveApp>, label: &str) {
+    // The settings panel scrolls, so make sure the widget is on screen first.
+    harness.get_by_label(label).scroll_to_me();
+    // Scrolling is animated, so wait for the widget to stop moving.
+    let mut rect = harness.get_by_label(label).rect();
+    let mut still = 0;
+    for _ in 0..60 {
+        harness.step();
+        let now = harness.get_by_label(label).rect();
+        still = if now == rect { still + 1 } else { 0 };
+        if still == 3 {
+            break;
+        }
+        rect = now;
+    }
     harness.get_by_label(label).click();
     harness.run_steps(2);
 }

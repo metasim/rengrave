@@ -7,8 +7,10 @@
 //! The settings panel: all job settings, grouped by the step of the workflow they belong to.
 
 use crate::app::{RengraveApp, StatusLevel, Tab};
+use crate::icons;
+use crate::style::Look;
 use crate::widgets::{Form, Number, UiExt};
-use egui::{CollapsingHeader, Grid, RichText, Ui};
+use egui::{CollapsingHeader, Grid, Ui};
 use rengrave_core::{
     ArcFit, BitShape, BuiltinFont, CheckScope, CleanupBit, CutType, HeightCalc, InputType, Justify,
     Origin, Settings, Tracer, TurnPolicy,
@@ -21,7 +23,7 @@ impl RengraveApp {
     /// Draws the panel: tabs, the active tab's settings, and the primary action.
     pub(crate) fn inspector(&mut self, ui: &mut Ui) {
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
+        ui.option_group(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Design, "Design")
                 .on_hover_text("What to cut, and where");
             ui.selectable_value(&mut self.tab, Tab::Toolpath, "Toolpath")
@@ -62,7 +64,7 @@ impl RengraveApp {
                 }
                 let can_calc = self.issues.is_empty();
                 if ui
-                    .add_enabled(can_calc, egui::Button::new("Calculate"))
+                    .icon_button(can_calc, icons::CALCULATE, "Calculate")
                     .on_hover_text("Reload the source file and calculate V-carve paths now (F5)")
                     .clicked()
                 {
@@ -71,15 +73,16 @@ impl RengraveApp {
             });
         }
         let enabled = self.can_write_gcode();
-        let save = egui::Button::new(
-            RichText::new("Save G-code…")
-                .strong()
-                .color(ui.visuals().selection.stroke.color),
-        )
+        let save = egui::Button::new((
+            Look::icon(icons::SAVE).color(ui.visuals().selection.stroke.color),
+            Look::bold("Save G-code…").color(ui.visuals().selection.stroke.color),
+        ))
         .fill(ui.visuals().selection.bg_fill)
         .min_size(egui::vec2(ui.available_width(), 30.0));
-        if ui
-            .add_enabled(enabled, save)
+        let response = ui.add_enabled(enabled, save);
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, "Save G-code…"));
+        if response
             .on_disabled_hover_text("Waiting for toolpaths, or settings need attention.")
             .clicked()
         {
@@ -89,7 +92,7 @@ impl RengraveApp {
     }
 
     fn design_tab(&mut self, ui: &mut Ui) {
-        CollapsingHeader::new("Source")
+        CollapsingHeader::new(ui.section_heading("Source"))
             .default_open(true)
             .show(ui, |ui| {
                 ui.segmented(
@@ -105,21 +108,21 @@ impl RengraveApp {
                     InputType::Image => self.image_source(ui),
                 }
             });
-        CollapsingHeader::new("Size and spacing")
+        CollapsingHeader::new(ui.section_heading("Size and spacing"))
             .default_open(true)
             .show(ui, |ui| self.size_section(ui));
-        CollapsingHeader::new("Position")
+        CollapsingHeader::new(ui.section_heading("Position"))
             .default_open(true)
             .show(ui, |ui| self.position_section(ui));
         if self.settings.input_type == InputType::Text {
-            CollapsingHeader::new("Text on a circle")
+            CollapsingHeader::new(ui.section_heading("Text on a circle"))
                 .default_open(self.settings.text_radius != 0.0)
                 .show(ui, |ui| self.circle_section(ui));
         }
     }
 
     fn text_source(&mut self, ui: &mut Ui) {
-        let label = ui.label("Text to engrave");
+        let label = ui.label(ui.control_label("Text to engrave"));
         ui.add(
             egui::TextEdit::multiline(&mut self.settings.text)
                 .desired_rows(3)
@@ -129,7 +132,7 @@ impl RengraveApp {
 
         ui.horizontal(|ui| {
             let selected = self.font_label();
-            let label = ui.label("Font");
+            let label = ui.label(ui.control_label("Font"));
             let response = egui::ComboBox::from_id_salt("font_combo")
                 .selected_text(selected)
                 .width(170.0)
@@ -139,7 +142,7 @@ impl RengraveApp {
                 .labelled_by(label.id)
                 .on_hover_text("The font for the text");
             if ui
-                .button("Folder…")
+                .icon_button(true, icons::OPEN, "Folder…")
                 .on_hover_text("Choose a folder of font files")
                 .clicked()
             {
@@ -206,11 +209,11 @@ impl RengraveApp {
                 |n| n.to_string_lossy().into_owned(),
             );
             ui.label(name);
-            if ui.button("Open…").clicked() {
+            if ui.icon_button(true, icons::OPEN, "Open…").clicked() {
                 self.open_image_dialog();
             }
             if ui
-                .button("Reload")
+                .icon_button(true, icons::CALCULATE, "Reload")
                 .on_hover_text("Read the file again, after changing it elsewhere (F5)")
                 .clicked()
             {
@@ -218,7 +221,8 @@ impl RengraveApp {
             }
         });
         ui.weak("DXF, PNG, BMP, PBM, JPEG, GIF, or TIFF. You can also drop a file on the window.");
-        CollapsingHeader::new("Bitmap tracing").show(ui, |ui| self.tracing_section(ui));
+        CollapsingHeader::new(ui.section_heading("Bitmap tracing"))
+            .show(ui, |ui| self.tracing_section(ui));
     }
 
     fn tracing_section(&mut self, ui: &mut Ui) {
@@ -378,7 +382,7 @@ impl RengraveApp {
                     },
                     &mut s.line_space,
                 );
-                ui.label("Height from")
+                ui.label(ui.control_label("Height from"))
                     .on_hover_text("Which characters determine the height");
                 ui.segmented(&mut s.height_calc,
                     &[
@@ -395,7 +399,7 @@ impl RengraveApp {
                     ],
                 );
                 ui.end_row();
-                ui.label("Justify")
+                ui.label(ui.control_label("Justify"))
                     .on_hover_text("Alignment of multiple lines");
                 ui.segmented(&mut s.justify,
                     &[
@@ -413,7 +417,7 @@ impl RengraveApp {
         ui.horizontal(|ui| {
             ui.origin_grid(&mut self.settings.origin);
             ui.vertical(|ui| {
-                ui.label("Work origin")
+                ui.label(ui.control_label("Work origin"))
                     .on_hover_text("Which point of the design is X0 Y0");
                 ui.radio_value(&mut self.settings.origin, Origin::Default, "Design origin")
                     .on_hover_text("The start of the text baseline, or the origin of the file");
@@ -500,7 +504,7 @@ impl RengraveApp {
                 "Radius of the circle; zero means straight text",
                 &mut s.text_radius,
             );
-            ui.label("Side")
+            ui.label(ui.control_label("Side"))
                 .on_hover_text("Whether characters stand outside or inside the circle");
             ui.segmented(
                 &mut s.outer,
@@ -510,7 +514,7 @@ impl RengraveApp {
                 ],
             );
             ui.end_row();
-            ui.label("Placement")
+            ui.label(ui.control_label("Placement"))
                 .on_hover_text("Whether text runs over the top or under the bottom of the circle");
             ui.segmented(
                 &mut s.upper,
@@ -531,7 +535,7 @@ impl RengraveApp {
     }
 
     fn toolpath_tab(&mut self, ui: &mut Ui) {
-        CollapsingHeader::new("Cut")
+        CollapsingHeader::new(ui.section_heading("Cut"))
             .default_open(true)
             .show(ui, |ui| {
                 ui.segmented(
@@ -550,18 +554,21 @@ impl RengraveApp {
                     ],
                 );
             });
-        CollapsingHeader::new("Feeds and heights")
+        CollapsingHeader::new(ui.section_heading("Feeds and heights"))
             .default_open(true)
             .show(ui, |ui| self.machine_section(ui));
         if self.settings.cut_type == CutType::VCarve {
-            CollapsingHeader::new("Bit")
+            CollapsingHeader::new(ui.section_heading("Bit"))
                 .default_open(true)
                 .show(ui, |ui| self.bit_section(ui));
-            CollapsingHeader::new("Multi-pass").show(ui, |ui| self.multipass_section(ui));
-            CollapsingHeader::new("Inlay").show(ui, |ui| self.inlay_section(ui));
-            CollapsingHeader::new("Advanced V-carve")
+            CollapsingHeader::new(ui.section_heading("Multi-pass"))
+                .show(ui, |ui| self.multipass_section(ui));
+            CollapsingHeader::new(ui.section_heading("Inlay"))
+                .show(ui, |ui| self.inlay_section(ui));
+            CollapsingHeader::new(ui.section_heading("Advanced V-carve"))
                 .show(ui, |ui| self.advanced_carve_section(ui));
-            CollapsingHeader::new("Cleanup").show(ui, |ui| self.cleanup_section(ui));
+            CollapsingHeader::new(ui.section_heading("Cleanup"))
+                .show(ui, |ui| self.cleanup_section(ui));
         }
     }
 
@@ -670,7 +677,7 @@ impl RengraveApp {
                 &mut s.v_depth_limit,
             );
             let dp = s.units.coord_decimals();
-            ui.label("Deepest cut")
+            ui.label(ui.control_label("Deepest cut"))
                 .on_hover_text("The deepest Z this bit will reach");
             ui.monospace(format!("{:.dp$}{unit}", s.max_cut_depth()));
             ui.end_row();
@@ -777,7 +784,7 @@ impl RengraveApp {
                 },
                 &mut s.v_step_corner,
             );
-            ui.label("Limit by")
+            ui.label(ui.control_label("Limit by"))
                 .on_hover_text("Which outlines limit the cut at each point");
             ui.segmented(
                 &mut s.v_check_scope,
@@ -894,7 +901,7 @@ impl RengraveApp {
     }
 
     fn output_tab(&mut self, ui: &mut Ui) {
-        CollapsingHeader::new("G-code format")
+        CollapsingHeader::new(ui.section_heading("G-code format"))
             .default_open(true)
             .show(ui, |ui| {
                 let unit = self.unit();
@@ -905,7 +912,8 @@ impl RengraveApp {
                 };
                 let s = &mut self.settings;
                 ui.form_grid("format_grid", |ui| {
-                    ui.label("Arcs").on_hover_text("How curves are written");
+                    ui.label(ui.control_label("Arcs"))
+                        .on_hover_text("How curves are written");
                     ui.segmented(
                         &mut s.arc_fit,
                         &[
@@ -980,7 +988,7 @@ impl RengraveApp {
                 self.settings.remove_unsupported_codes();
             }
         }
-        CollapsingHeader::new("Export")
+        CollapsingHeader::new(ui.section_heading("Export"))
             .default_open(true)
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -999,7 +1007,7 @@ impl RengraveApp {
                 });
             });
         if let Some(design) = self.design().cloned() {
-            CollapsingHeader::new("Job summary")
+            CollapsingHeader::new(ui.section_heading("Job summary"))
                 .default_open(true)
                 .show(ui, |ui| {
                     let unit = self.unit();
