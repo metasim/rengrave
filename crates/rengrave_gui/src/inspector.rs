@@ -632,6 +632,7 @@ impl RengraveApp {
                 ),
             ],
         );
+        ui.add_space(8.0);
         ui.bit_profile(&self.settings);
         let unit = self.unit();
         let issues = self.issues.clone();

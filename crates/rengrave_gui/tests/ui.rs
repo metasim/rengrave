@@ -326,6 +326,25 @@ fn export_submenu_lists_the_drawing_formats() {
 }
 
 #[test]
+fn new_resets_the_settings_to_the_defaults() {
+    let (mut harness, _) = harness();
+    harness.state_mut().settings.text = "Changed".into();
+    harness.state_mut().settings.feed = 99.0;
+    click(&mut harness, "File");
+    harness
+        .get_all_by_label_contains("New")
+        .next()
+        .expect("the New menu item")
+        .click();
+    harness.run_steps(3);
+    // The harness starts from its own settings, so these are the application's defaults.
+    let settings = &harness.state().settings;
+    assert_eq!(settings.text, "rengrave");
+    assert_eq!(settings.feed, 5.0);
+    assert_eq!(settings.v_step_len, 0.01);
+}
+
+#[test]
 fn about_window_opens() {
     let (mut harness, _) = harness();
     click(&mut harness, "Help");

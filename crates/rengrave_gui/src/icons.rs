@@ -18,6 +18,8 @@ pub const RESTART: char = '\u{e148}';
 pub const FINISH: char = '\u{e160}';
 /// Corner brackets that grow outward.
 pub const FIT: char = '\u{e112}';
+/// A sheet with a plus.
+pub const NEW: char = '\u{e0c9}';
 /// An open folder.
 pub const OPEN: char = '\u{e247}';
 /// A floppy disk.
