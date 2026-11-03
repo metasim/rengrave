@@ -229,6 +229,20 @@ impl Font {
         }
     }
 
+    /// Lists the `.cxf`, `.ttf`, and `.otf` files directly inside `dir`, sorted by name.
+    pub fn list_files(dir: &Path) -> Result<Vec<PathBuf>> {
+        let entries = std::fs::read_dir(dir).map_err(|source| Error::Io {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+        let mut files: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| matches!(extension_upper(p).as_str(), "CXF" | "TTF" | "OTF"))
+            .collect();
+        files.sort();
+        Ok(files)
+    }
+
     /// Wraps a single drawing (a traced image or DXF) as a one-character font.
     ///
     /// The drawing is addressed by [`IMAGE_GLYPH`].
@@ -242,21 +256,8 @@ impl Font {
 /// The character under which drawings are stored by [`Font::from_drawing`].
 pub const IMAGE_GLYPH: char = 'F';
 
-/// Lists the `.cxf`, `.ttf`, and `.otf` files directly inside `dir`, sorted by name.
-pub fn list_font_files(dir: &Path) -> Result<Vec<PathBuf>> {
-    let entries = std::fs::read_dir(dir).map_err(|source| Error::Io {
-        path: dir.to_path_buf(),
-        source,
-    })?;
-    let mut files: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| matches!(extension_upper(p).as_str(), "CXF" | "TTF" | "OTF"))
-        .collect();
-    files.sort();
-    Ok(files)
-}
-
-pub(crate) fn extension_upper(path: &Path) -> String {
+/// The file's extension in upper case, or an empty string if it has none.
+pub fn extension_upper(path: &Path) -> String {
     path.extension()
         .map(|e| e.to_string_lossy().to_uppercase())
         .unwrap_or_default()

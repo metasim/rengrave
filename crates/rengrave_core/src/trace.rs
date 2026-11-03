@@ -1,6 +1,6 @@
 //! Converts raster images to outline strokes, natively or with the external `potrace` program.
 
-use crate::dxf::read_dxf;
+use crate::dxf::DxfDrawing;
 use crate::error::{Error, Result};
 use crate::font::{Stroke, extension_upper};
 use crate::settings::{Settings, Tracer, TurnPolicy};
@@ -290,46 +290,48 @@ impl Bitmap {
     }
 }
 
-/// Runs `potrace` on `bitmap`, returning its result as strokes in pixel units.
-fn potrace(bitmap: &Bitmap, settings: &Settings) -> Result<Vec<Stroke>> {
-    let mut command = Command::new("potrace");
-    command
-        .args(["-z", settings.bmp_turn_policy.name()])
-        .args(["-t", &settings.bmp_turd_size.to_string()])
-        .args(["-a", &settings.bmp_alpha_max.to_string()]);
-    if settings.bmp_long_curve {
-        command.args(["-O", &settings.bmp_opt_tolerance.to_string()]);
-    } else {
-        command.arg("-n");
+impl Bitmap {
+    /// Runs `potrace` on the bitmap, returning its result as strokes in pixel units.
+    fn potrace(&self, settings: &Settings) -> Result<Vec<Stroke>> {
+        let mut command = Command::new("potrace");
+        command
+            .args(["-z", settings.bmp_turn_policy.name()])
+            .args(["-t", &settings.bmp_turd_size.to_string()])
+            .args(["-a", &settings.bmp_alpha_max.to_string()]);
+        if settings.bmp_long_curve {
+            command.args(["-O", &settings.bmp_opt_tolerance.to_string()]);
+        } else {
+            command.arg("-n");
+        }
+        command.args(["-b", "dxf", "-", "-o", "-"]);
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| Error::Import(format!("unable to run potrace: {e}")))?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| Error::Import("unable to write to potrace".into()))?;
+        let pbm = self.to_pbm();
+        // Write from another thread: potrace may fill its output pipe before reading all its input.
+        let writer = std::thread::spawn(move || stdin.write_all(&pbm));
+        let output = child
+            .wait_with_output()
+            .map_err(|e| Error::Import(format!("potrace failed: {e}")))?;
+        let write_result = writer
+            .join()
+            .map_err(|_| Error::Import("potrace input thread panicked".into()))?;
+        if !output.status.success() {
+            return Err(Error::Import(format!(
+                "potrace failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        write_result.map_err(|e| Error::Import(format!("unable to write to potrace: {e}")))?;
+        Ok(DxfDrawing::parse(&String::from_utf8_lossy(&output.stdout), settings.seg_arc)?.strokes)
     }
-    command.args(["-b", "dxf", "-", "-o", "-"]);
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| Error::Import(format!("unable to run potrace: {e}")))?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| Error::Import("unable to write to potrace".into()))?;
-    let pbm = bitmap.to_pbm();
-    // Write from another thread: potrace may fill its output pipe before reading all its input.
-    let writer = std::thread::spawn(move || stdin.write_all(&pbm));
-    let output = child
-        .wait_with_output()
-        .map_err(|e| Error::Import(format!("potrace failed: {e}")))?;
-    let write_result = writer
-        .join()
-        .map_err(|_| Error::Import("potrace input thread panicked".into()))?;
-    if !output.status.success() {
-        return Err(Error::Import(format!(
-            "potrace failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    write_result.map_err(|e| Error::Import(format!("unable to write to potrace: {e}")))?;
-    Ok(read_dxf(&String::from_utf8_lossy(&output.stdout), settings.seg_arc)?.strokes)
 }
 
 /// The strokes imported from a drawing or image, with any notes for the user.
@@ -350,7 +352,8 @@ impl ImportedDrawing {
                     path: path.to_path_buf(),
                     source,
                 })?;
-                let drawing = read_dxf(&String::from_utf8_lossy(&bytes), settings.seg_arc)?;
+                let drawing =
+                    DxfDrawing::parse(&String::from_utf8_lossy(&bytes), settings.seg_arc)?;
                 let warnings = drawing
                     .ignored
                     .iter()
@@ -372,7 +375,7 @@ impl ImportedDrawing {
                         settings.bmp_opt_tolerance,
                         settings.bmp_long_curve,
                     ),
-                    Tracer::Potrace => potrace(&bitmap, settings)?,
+                    Tracer::Potrace => bitmap.potrace(settings)?,
                 };
                 Ok(Self {
                     strokes,

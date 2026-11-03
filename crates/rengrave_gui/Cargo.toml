@@ -23,6 +23,11 @@ rfd.workspace = true
 
 [dev-dependencies]
 egui_kittest.workspace = true
+image = { workspace = true }
+
+[features]
+# Enables the screenshot test, which needs a GPU: `cargo test -p rengrave_gui --features screenshots`.
+screenshots = ["egui_kittest/wgpu", "egui_kittest/snapshot"]
 
 [lints]
 workspace = true

@@ -4,7 +4,7 @@ use crate::design::Design;
 use crate::error::{Error, Result};
 use crate::geom::{ZERO, angle_from_sin_cos};
 use crate::settings::{ArcFit, BitShape, CleanupBit, CutType, InputType, Settings};
-use crate::sort::sort_paths;
+use crate::sort::PathRange;
 use crate::vcarve::{CarvePath, CarvePoint};
 
 const PROGRAM_NAME: &str = concat!("rengrave-", env!("CARGO_PKG_VERSION"));
@@ -126,132 +126,134 @@ enum Work {
     Emit(usize),
 }
 
-/// Simplifies a cut path with the Douglas-Peucker algorithm, optionally fitting arcs.
-///
-/// The result never strays from the input by more than `tolerance`. A trailing section that
-/// returns to the first point of a span is emitted as a closing move to that point.
-fn simplify(points: &[Xyz], tolerance: f64, fit_arcs: bool) -> Vec<Fitted> {
-    let mut out = Vec::new();
-    if points.is_empty() {
-        return out;
-    }
-    let mut stack = vec![Work::Visit {
-        lo: 0,
-        hi: points.len() - 1,
-        first: true,
-    }];
-    // A closing move is queued as Emit(lo) beneath the work for a span.
-    while let Some(work) = stack.pop() {
-        let (lo, mut hi, first) = match work {
-            Work::Emit(i) => {
-                out.push(Fitted::Line(points[i]));
+impl Fitted {
+    /// Simplifies a cut path with the Douglas-Peucker algorithm, optionally fitting arcs.
+    ///
+    /// The result never strays from the input by more than `tolerance`. A trailing section that
+    /// returns to the first point of a span is emitted as a closing move to that point.
+    fn simplify(points: &[Xyz], tolerance: f64, fit_arcs: bool) -> Vec<Self> {
+        let mut out = Vec::new();
+        if points.is_empty() {
+            return out;
+        }
+        let mut stack = vec![Work::Visit {
+            lo: 0,
+            hi: points.len() - 1,
+            first: true,
+        }];
+        // A closing move is queued as Emit(lo) beneath the work for a span.
+        while let Some(work) = stack.pop() {
+            let (lo, mut hi, first) = match work {
+                Work::Emit(i) => {
+                    out.push(Fitted::Line(points[i]));
+                    continue;
+                }
+                Work::Visit { lo, hi, first } => (lo, hi, first),
+            };
+            if lo == hi {
+                out.push(Fitted::Line(points[lo]));
                 continue;
             }
-            Work::Visit { lo, hi, first } => (lo, hi, first),
-        };
-        if lo == hi {
-            out.push(Fitted::Line(points[lo]));
-            continue;
-        }
-        let start = points[lo];
-        let coincident = |p: Xyz| {
-            (start[0] - p[0]).abs() < ZERO
-                && (start[1] - p[1]).abs() < ZERO
-                && (start[2] - p[2]).abs() < ZERO
-        };
-        let mut closes = false;
-        while hi > lo && coincident(points[hi]) {
-            closes = true;
-            hi -= 1;
-        }
-        if hi == lo {
-            // Every point in the span coincides with the first.
-            continue;
-        }
-        if closes {
-            stack.push(Work::Emit(lo));
-        }
-        let end = points[hi];
+            let start = points[lo];
+            let coincident = |p: Xyz| {
+                (start[0] - p[0]).abs() < ZERO
+                    && (start[1] - p[1]).abs() < ZERO
+                    && (start[2] - p[2]).abs() < ZERO
+            };
+            let mut closes = false;
+            while hi > lo && coincident(points[hi]) {
+                closes = true;
+                hi -= 1;
+            }
+            if hi == lo {
+                // Every point in the span coincides with the first.
+                continue;
+            }
+            if closes {
+                stack.push(Work::Emit(lo));
+            }
+            let end = points[hi];
 
-        let mut worst_dist = 0.0;
-        let mut worst_dist_z = 0.0;
-        let mut worst = 0;
-        let mut min_rad = f64::MAX;
-        let mut max_arc = 0;
-        for (i, &p) in points.iter().enumerate().take(hi).skip(lo + 1) {
-            let dist = dist_to_segment(start, end, p, false);
-            let dist_z = dist_to_segment(start, end, p, true);
-            if dist > worst_dist {
-                worst = i;
-                worst_dist = dist;
-                if fit_arcs
-                    && let Some(rad) = circle_radius(start, p, end)
-                    && rad < min_rad
-                {
-                    max_arc = i;
-                    min_rad = rad;
+            let mut worst_dist = 0.0;
+            let mut worst_dist_z = 0.0;
+            let mut worst = 0;
+            let mut min_rad = f64::MAX;
+            let mut max_arc = 0;
+            for (i, &p) in points.iter().enumerate().take(hi).skip(lo + 1) {
+                let dist = dist_to_segment(start, end, p, false);
+                let dist_z = dist_to_segment(start, end, p, true);
+                if dist > worst_dist {
+                    worst = i;
+                    worst_dist = dist;
+                    if fit_arcs
+                        && let Some(rad) = circle_radius(start, p, end)
+                        && rad < min_rad
+                    {
+                        max_arc = i;
+                        min_rad = rad;
+                    }
+                }
+                if dist_z > worst_dist_z {
+                    worst_dist_z = dist_z;
                 }
             }
-            if dist_z > worst_dist_z {
-                worst_dist_z = dist_z;
-            }
-        }
 
-        let mut arc: Option<((f64, f64), f64)> = None;
-        if min_rad != f64::MAX
-            && let Some(center) = circle_center(start, points[max_arc], end)
-            && arc_is_fittable(center, start, points[max_arc], end)
-        {
-            let mut worst_arc = 0.0_f64;
-            for p in &points[lo..=hi] {
-                let radial = ((center.0 - p[0]).hypot(center.1 - p[1]) - min_rad).abs();
-                let dist = (worst_dist_z * worst_dist_z + radial * radial).sqrt();
-                worst_arc = worst_arc.max(dist);
+            let mut arc: Option<((f64, f64), f64)> = None;
+            if min_rad != f64::MAX
+                && let Some(center) = circle_center(start, points[max_arc], end)
+                && arc_is_fittable(center, start, points[max_arc], end)
+            {
+                let mut worst_arc = 0.0_f64;
+                for p in &points[lo..=hi] {
+                    let radial = ((center.0 - p[0]).hypot(center.1 - p[1]) - min_rad).abs();
+                    let dist = (worst_dist_z * worst_dist_z + radial * radial).sqrt();
+                    worst_arc = worst_arc.max(dist);
+                }
+                arc = Some((center, worst_arc));
             }
-            arc = Some((center, worst_arc));
-        }
 
-        match arc {
-            Some((center, worst_arc)) if worst_arc < tolerance && worst_arc < worst_dist => {
-                let mid = points[max_arc];
-                let doubled_area = (start[0] * mid[1] - mid[0] * start[1])
-                    + (mid[0] * end[1] - end[0] * mid[1])
-                    + (end[0] * start[1] - start[0] * end[1]);
-                out.push(Fitted::Line(start));
-                out.push(Fitted::Arc {
-                    to: end,
-                    ccw: doubled_area > 0.0,
-                    offset: [center.0 - start[0], center.1 - start[1]],
-                });
-            }
-            _ if worst_dist > tolerance => {
-                if first {
-                    stack.push(Work::Emit(hi));
-                }
-                stack.push(Work::Visit {
-                    lo: worst,
-                    hi,
-                    first: false,
-                });
-                stack.push(Work::Emit(worst));
-                stack.push(Work::Visit {
-                    lo,
-                    hi: worst,
-                    first: false,
-                });
-                if first {
-                    stack.push(Work::Emit(lo));
-                }
-            }
-            _ => {
-                if first {
+            match arc {
+                Some((center, worst_arc)) if worst_arc < tolerance && worst_arc < worst_dist => {
+                    let mid = points[max_arc];
+                    let doubled_area = (start[0] * mid[1] - mid[0] * start[1])
+                        + (mid[0] * end[1] - end[0] * mid[1])
+                        + (end[0] * start[1] - start[0] * end[1]);
                     out.push(Fitted::Line(start));
-                    out.push(Fitted::Line(end));
+                    out.push(Fitted::Arc {
+                        to: end,
+                        ccw: doubled_area > 0.0,
+                        offset: [center.0 - start[0], center.1 - start[1]],
+                    });
+                }
+                _ if worst_dist > tolerance => {
+                    if first {
+                        stack.push(Work::Emit(hi));
+                    }
+                    stack.push(Work::Visit {
+                        lo: worst,
+                        hi,
+                        first: false,
+                    });
+                    stack.push(Work::Emit(worst));
+                    stack.push(Work::Visit {
+                        lo,
+                        hi: worst,
+                        first: false,
+                    });
+                    if first {
+                        stack.push(Work::Emit(lo));
+                    }
+                }
+                _ => {
+                    if first {
+                        out.push(Fitted::Line(start));
+                        out.push(Fitted::Line(end));
+                    }
                 }
             }
         }
+        out
     }
-    out
 }
 
 /// Accumulates cuts and writes them in modal form, omitting unchanged axis words.
@@ -300,7 +302,7 @@ impl MotionWriter {
             return;
         }
         let cuts = std::mem::take(&mut self.cuts);
-        for fitted in simplify(&cuts, self.tolerance, self.arc_fit != ArcFit::None) {
+        for fitted in Fitted::simplify(&cuts, self.tolerance, self.arc_fit != ArcFit::None) {
             match fitted {
                 Fitted::Line(p) => self.write_move(out, "G1", p, None),
                 Fitted::Arc { to, ccw, offset } => {
@@ -602,7 +604,7 @@ impl GcodeProgram {
                 old_y = s.y2;
             }
         }
-        let order = sort_paths(&ecoords, |c| (c.0, c.1), |c| c.2);
+        let order = PathRange::order_loops(&ecoords, |c| (c.0, c.1), |c| c.2);
 
         while passes.advance() {
             let mut z1 = depth;
@@ -808,7 +810,7 @@ impl GcodeProgram {
         let mut coords_out = coords.to_vec();
         let mut passes = Passes::new(settings);
         while passes.advance() {
-            let order = sort_paths(&coords_out, |c| (c.x, c.y), |c| c.loop_num);
+            let order = PathRange::order_loops(&coords_out, |c| (c.x, c.y), |c| c.loop_num);
             coords_out = order
                 .iter()
                 .flat_map(|r| r.indices().map(|i| coords_out[i]).collect::<Vec<_>>())
@@ -902,14 +904,14 @@ mod tests {
     #[test]
     fn straight_run_reduces_to_endpoints() {
         let input = pts(&[(0.0, 0.0), (1.0, 0.0), (2.0, 0.00001), (3.0, 0.0)]);
-        let out = simplify(&input, 0.001, false);
+        let out = Fitted::simplify(&input, 0.001, false);
         assert_eq!(out, [Fitted::Line(input[0]), Fitted::Line(input[3])]);
     }
 
     #[test]
     fn significant_corner_is_kept() {
         let input = pts(&[(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)]);
-        let out = simplify(&input, 0.001, false);
+        let out = Fitted::simplify(&input, 0.001, false);
         assert!(out.contains(&Fitted::Line(input[1])));
     }
 
@@ -922,7 +924,7 @@ mod tests {
             })
             .collect();
         let tol = 0.01;
-        let kept: Vec<Xyz> = simplify(&input, tol, false)
+        let kept: Vec<Xyz> = Fitted::simplify(&input, tol, false)
             .into_iter()
             .map(|f| match f {
                 Fitted::Line(p) | Fitted::Arc { to: p, .. } => p,
@@ -941,7 +943,7 @@ mod tests {
     #[test]
     fn closed_loop_returns_to_start() {
         let input = pts(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)]);
-        let out = simplify(&input, 0.001, false);
+        let out = Fitted::simplify(&input, 0.001, false);
         assert_eq!(out.first(), Some(&Fitted::Line(input[0])));
         assert_eq!(out.last(), Some(&Fitted::Line(input[0])));
     }
@@ -949,10 +951,10 @@ mod tests {
     #[test]
     fn single_point_passes_through_and_coincident_points_vanish() {
         let one = pts(&[(1.0, 2.0)]);
-        assert_eq!(simplify(&one, 0.001, false), [Fitted::Line(one[0])]);
+        assert_eq!(Fitted::simplify(&one, 0.001, false), [Fitted::Line(one[0])]);
         let same = pts(&[(1.0, 2.0), (1.0, 2.0), (1.0, 2.0)]);
-        assert!(simplify(&same, 0.001, false).is_empty());
-        assert!(simplify(&[], 0.001, false).is_empty());
+        assert!(Fitted::simplify(&same, 0.001, false).is_empty());
+        assert!(Fitted::simplify(&[], 0.001, false).is_empty());
     }
 
     fn arc_points(cx: f64, cy: f64, r: f64, from: f64, to: f64, n: usize) -> Vec<Xyz> {
@@ -967,7 +969,7 @@ mod tests {
     #[test]
     fn arc_fit_finds_ccw_arc() {
         let input = arc_points(5.0, 5.0, 2.0, 10.0, 80.0, 40);
-        let out = simplify(&input, 0.001, true);
+        let out = Fitted::simplify(&input, 0.001, true);
         assert_eq!(out.len(), 2, "{out:?}");
         let Fitted::Arc { to, ccw, offset } = out[1] else {
             panic!("expected arc");
@@ -981,21 +983,21 @@ mod tests {
     #[test]
     fn arc_fit_finds_cw_arc() {
         let input = arc_points(0.0, 0.0, 3.0, 80.0, 10.0, 40);
-        let out = simplify(&input, 0.001, true);
+        let out = Fitted::simplify(&input, 0.001, true);
         assert!(matches!(out[1], Fitted::Arc { ccw: false, .. }));
     }
 
     #[test]
     fn arc_fit_refuses_multiple_quadrants_as_single_arc() {
         let input = arc_points(0.0, 0.0, 3.0, 45.0, 135.0, 40);
-        let out = simplify(&input, 0.001, true);
+        let out = Fitted::simplify(&input, 0.001, true);
         assert!(out.len() > 2, "should be split: {out:?}");
     }
 
     #[test]
     fn arc_fit_leaves_lines_alone() {
         let input = pts(&[(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)]);
-        let out = simplify(&input, 0.001, true);
+        let out = Fitted::simplify(&input, 0.001, true);
         assert!(out.iter().all(|f| matches!(f, Fitted::Line(_))));
     }
 

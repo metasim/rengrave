@@ -9,7 +9,6 @@ use crate::error::Result;
 use crate::geom::{Point, Segment, ZERO, angle_from_sin_cos};
 use crate::progress::Progress;
 use crate::settings::{BitShape, CheckScope, InputType, Settings};
-use crate::sort::sort_for_v_carve;
 
 /// A tool position with its cone radius at the material surface.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -155,6 +154,14 @@ struct Carver<'a> {
 }
 
 impl Carver<'_> {
+    /// The turn between the previous segment's frame and a new direction, in degrees.
+    fn turn_angle(dx: f64, dy: f64, sin0: f64, cos0: f64) -> f64 {
+        let xt = dx * cos0 - dy * sin0;
+        let yt = dx * sin0 + dy * cos0;
+        let l = (xt * xt + yt * yt).sqrt();
+        angle_from_sin_cos(yt / l, xt / l)
+    }
+
     /// Largest circle radius, up to the tool's, at `(x, y)` tangent to a line with the given
     /// transformed orientation. `corner` excludes segments that meet at the point.
     fn max_circle(&self, x: f64, y: f64, char_num: usize, sin: f64, cos: f64, corner: bool) -> f64 {
@@ -266,7 +273,7 @@ impl CarvePath {
     /// Calculates the V-carve toolpath for `design`.
     ///
     /// For image input, `design`'s segments are first replaced by closed, oriented loops, as
-    /// produced by [`sort_for_v_carve`]. Progress is reported in terms of outline length, and
+    /// produced by [`Segment::sort_into_loops`]. Progress is reported in terms of outline length, and
     /// canceling returns [`Error::Canceled`].
     pub fn calculate(
         design: &mut Design,
@@ -275,7 +282,7 @@ impl CarvePath {
     ) -> Result<Self> {
         settings.ensure_valid()?;
         if settings.input_type == InputType::Image {
-            design.segments = sort_for_v_carve(&design.segments, settings.accuracy);
+            design.segments = Segment::sort_into_loops(&design.segments, settings.accuracy);
         }
 
         let mut path = Self::default();
@@ -370,7 +377,7 @@ impl CarvePath {
             let delta = if cos0 > 1.0 {
                 180.0
             } else {
-                turn_angle(x2 - x1, y2 - y1, sin0, cos0)
+                Carver::turn_angle(x2 - x1, y2 - y1, sin0, cos0)
             };
             if delta < drive_corner && drives_to_corner {
                 path.points.push(CarvePoint {
@@ -415,7 +422,7 @@ impl CarvePath {
 
             // Close a loop that has returned to its start.
             if (x2 - xa).abs() < ZERO && (y2 - ya).abs() < ZERO {
-                let delta = turn_angle(xb - xa, yb - ya, sin0, cos0);
+                let delta = Carver::turn_angle(xb - xa, yb - ya, sin0, cos0);
                 if delta < drive_corner {
                     path.points.push(CarvePoint {
                         x: xa,
@@ -461,14 +468,6 @@ impl CarvePath {
             self.record(x, y, sub_phi, rout, loop_num);
         }
     }
-}
-
-/// The turn between the previous segment's frame and a new direction, in degrees.
-fn turn_angle(dx: f64, dy: f64, sin0: f64, cos0: f64) -> f64 {
-    let xt = dx * cos0 - dy * sin0;
-    let yt = dx * sin0 + dy * cos0;
-    let l = (xt * xt + yt * yt).sqrt();
-    angle_from_sin_cos(yt / l, xt / l)
 }
 
 #[cfg(test)]
@@ -693,7 +692,7 @@ mod tests {
     fn partitions_find_nearby_segments() {
         let settings = carve_settings();
         let mut design = Design::layout(&square_font(1.0), &settings).unwrap();
-        design.segments = sort_for_v_carve(&design.segments, settings.accuracy);
+        design.segments = Segment::sort_into_loops(&design.segments, settings.accuracy);
         let parts = Partitions::new(&design.segments, &design, 0.1, 0.01);
         // Any point near a segment must find it in the cell.
         for (i, s) in design.segments.iter().enumerate() {
@@ -713,8 +712,20 @@ mod tests {
     #[test]
     fn turn_angle_measures_relative_direction() {
         // Previous direction +X: cos0 = -1, sin0 = 0.
-        assert_abs_diff_eq!(turn_angle(1.0, 0.0, 0.0, -1.0), 180.0, epsilon = 1e-9);
-        assert_abs_diff_eq!(turn_angle(0.0, 1.0, 0.0, -1.0), 270.0, epsilon = 1e-9);
-        assert_abs_diff_eq!(turn_angle(0.0, -1.0, 0.0, -1.0), 90.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(
+            Carver::turn_angle(1.0, 0.0, 0.0, -1.0),
+            180.0,
+            epsilon = 1e-9
+        );
+        assert_abs_diff_eq!(
+            Carver::turn_angle(0.0, 1.0, 0.0, -1.0),
+            270.0,
+            epsilon = 1e-9
+        );
+        assert_abs_diff_eq!(
+            Carver::turn_angle(0.0, -1.0, 0.0, -1.0),
+            90.0,
+            epsilon = 1e-9
+        );
     }
 }

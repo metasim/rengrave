@@ -26,27 +26,27 @@ struct LineMetrics {
     depth: f64,
 }
 
-/// Maps `(x, y)` onto a circle of the given radius, then rotates by `angle` degrees.
-///
-/// Returns the mapped point and the angle along the circle in radians.
-fn wrap_rotate(x: f64, y: f64, angle: f64, radius: f64) -> (f64, f64, f64) {
-    let (xx, yy, alpha) = if radius != 0.0 {
-        let alpha = x / radius;
-        (
-            (radius + y) * alpha.sin(),
-            (radius + y) * alpha.cos(),
-            alpha,
-        )
-    } else {
-        (x, y, 0.0)
-    };
-    let rad = (xx * xx + yy * yy).sqrt();
-    let theta = yy.atan2(xx);
-    let new_angle = theta + angle.to_radians();
-    (rad * new_angle.cos(), rad * new_angle.sin(), alpha)
-}
-
 impl Design {
+    /// Maps `(x, y)` onto a circle of the given radius, then rotates by `angle` degrees.
+    ///
+    /// Returns the mapped point and the angle along the circle in radians.
+    fn wrap_rotate(x: f64, y: f64, angle: f64, radius: f64) -> (f64, f64, f64) {
+        let (xx, yy, alpha) = if radius != 0.0 {
+            let alpha = x / radius;
+            (
+                (radius + y) * alpha.sin(),
+                (radius + y) * alpha.cos(),
+                alpha,
+            )
+        } else {
+            (x, y, 0.0)
+        };
+        let rad = (xx * xx + yy * yy).sqrt();
+        let theta = yy.atan2(xx);
+        let new_angle = theta + angle.to_radians();
+        (rad * new_angle.cos(), rad * new_angle.sin(), alpha)
+    }
+
     /// Positions the text or drawing described by `settings` using the glyphs in `font`.
     ///
     /// Fails if the font lacks every requested character. Individually missing characters are
@@ -171,8 +171,8 @@ impl Design {
         if radius != 0.0 {
             let (mut min_a, mut max_a) = (f64::INFINITY, f64::NEG_INFINITY);
             for s in &mut segments {
-                let (x1, y1, a1) = wrap_rotate(s.x1, s.y1, 0.0, radius);
-                let (x2, y2, a2) = wrap_rotate(s.x2, s.y2, 0.0, radius);
+                let (x1, y1, a1) = Self::wrap_rotate(s.x1, s.y1, 0.0, radius);
+                let (x2, y2, a2) = Self::wrap_rotate(s.x2, s.y2, 0.0, radius);
                 (s.x1, s.y1, s.x2, s.y2) = (x1, y1, x2, y2);
                 max_a = max_a.max(a1).max(a2);
                 min_a = min_a.min(a1).min(a2);
@@ -196,8 +196,8 @@ impl Design {
         let mut max_r2 = 0.0_f64;
         for s in &mut segments {
             if settings.angle != 0.0 {
-                (s.x1, s.y1, _) = wrap_rotate(s.x1, s.y1, settings.angle, 0.0);
-                (s.x2, s.y2, _) = wrap_rotate(s.x2, s.y2, settings.angle, 0.0);
+                (s.x1, s.y1, _) = Self::wrap_rotate(s.x1, s.y1, settings.angle, 0.0);
+                (s.x2, s.y2, _) = Self::wrap_rotate(s.x2, s.y2, settings.angle, 0.0);
             }
             if settings.mirror {
                 s.x1 = -s.x1;
@@ -667,7 +667,7 @@ mod tests {
 
     #[test]
     fn wrap_rotate_identity_without_radius_or_angle() {
-        let (x, y, a) = wrap_rotate(3.0, 4.0, 0.0, 0.0);
+        let (x, y, a) = Design::wrap_rotate(3.0, 4.0, 0.0, 0.0);
         assert_abs_diff_eq!(x, 3.0, epsilon = 1e-12);
         assert_abs_diff_eq!(y, 4.0, epsilon = 1e-12);
         assert_eq!(a, 0.0);
