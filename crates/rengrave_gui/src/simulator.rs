@@ -166,7 +166,7 @@ impl SimulatorView {
             }
         });
         ui.separator();
-        ui.toggle_value(&mut self.show_path, "Path")
+        ui.toggle_button(&mut self.show_path, "Path")
             .on_hover_text("Show the whole tool path: cuts and rapid moves");
     }
 

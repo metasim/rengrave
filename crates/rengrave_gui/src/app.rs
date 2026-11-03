@@ -1097,12 +1097,12 @@ impl RengraveApp {
     fn preview_toolbar(&mut self, ui: &mut Ui) {
         self.fit_button(ui);
         if self.settings.cut_type == CutType::VCarve {
-            ui.toggle_value(&mut self.settings.show_v_area, "Area")
+            ui.toggle_button(&mut self.settings.show_v_area, "Area")
                 .on_hover_text("Show the area cut by the V-bit");
-            ui.toggle_value(&mut self.settings.show_v_path, "Path")
+            ui.toggle_button(&mut self.settings.show_v_path, "Path")
                 .on_hover_text("Show the path of the tool");
         }
-        ui.toggle_value(&mut self.preview.layers.grid, "Grid");
+        ui.toggle_button(&mut self.preview.layers.grid, "Grid");
     }
 
     fn gcode_view(&mut self, ui: &mut Ui) {

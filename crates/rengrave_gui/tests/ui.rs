@@ -1277,6 +1277,45 @@ fn hover_reports_design_coordinates() {
     assert!(harness.query_by_label_contains("  Y ").is_some());
 }
 
+/// Whether a stroked frame is drawn around the widget with the given accessible name.
+fn has_stroked_frame(harness: &Harness<'_, RengraveApp>, name: &str) -> bool {
+    let bounds = harness.get_by_label(name).rect();
+    harness
+        .output()
+        .shapes
+        .iter()
+        .any(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) => {
+                rect.rect.expand(1.0).contains_rect(bounds)
+                    && bounds.expand(1.0).contains_rect(rect.rect)
+                    && rect.stroke.width > 0.0
+                    && rect.stroke.color.a() > 0
+            }
+            _ => false,
+        })
+}
+
+#[test]
+fn toggles_look_like_buttons_when_off() {
+    let (mut harness, _) = harness();
+    for name in ["Area", "Path", "Grid"] {
+        assert!(has_stroked_frame(&harness, name), "{name} on");
+        click(&mut harness, name);
+        harness.remove_cursor();
+        harness.run_steps(2);
+        assert!(has_stroked_frame(&harness, name), "{name} off");
+    }
+
+    click(&mut harness, "Simulate");
+    harness.remove_cursor();
+    harness.run_steps(2);
+    let toggled = |h: &Harness<'_, RengraveApp>| h.get_by_label("Path").accesskit_node().toggled();
+    assert_eq!(toggled(&harness), Some(egui::accesskit::Toggled::False));
+    assert!(has_stroked_frame(&harness, "Path"), "Simulate path off");
+    click(&mut harness, "Path");
+    assert_eq!(toggled(&harness), Some(egui::accesskit::Toggled::True));
+}
+
 #[test]
 fn layer_toggles_are_available_and_work() {
     let (mut harness, _) = harness();
