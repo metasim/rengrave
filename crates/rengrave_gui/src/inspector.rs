@@ -186,23 +186,34 @@ impl RengraveApp {
                 || "No file selected".to_string(),
                 |n| n.to_string_lossy().into_owned(),
             );
-            ui.label(name);
-            if ui
-                .icon_button(true, icons::OPEN, "Open…")
-                .on_hover_text(
-                    "DXF, PNG, BMP, PBM, JPEG, GIF, or TIFF. You can also drop a file on the window.",
+            // Right to left, so that the file name takes whatever width the buttons leave.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .icon_button(true, icons::CALCULATE, "Reload")
+                    .on_hover_text("Read the file again, after changing it elsewhere (F5)")
+                    .clicked()
+                {
+                    self.reload_and_recalculate();
+                }
+                if ui
+                    .icon_button(true, icons::OPEN, "Open…")
+                    .on_hover_text(
+                        "DXF, PNG, BMP, PBM, JPEG, GIF, or TIFF. You can also drop a file on the window.",
+                    )
+                    .clicked()
+                {
+                    self.open_image_dialog();
+                }
+                // Read-only, so the name can be selected and copied but not edited.
+                ui.add(
+                    egui::TextEdit::singleline(&mut name.as_str())
+                        .desired_width(f32::INFINITY)
+                        .margin(egui::vec2(8.0, 6.0)),
                 )
-                .clicked()
-            {
-                self.open_image_dialog();
-            }
-            if ui
-                .icon_button(true, icons::CALCULATE, "Reload")
-                .on_hover_text("Read the file again, after changing it elsewhere (F5)")
-                .clicked()
-            {
-                self.reload_and_recalculate();
-            }
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Image file")
+                });
+            });
         });
         CollapsingHeader::new(ui.section_heading("Bitmap tracing"))
             .show(ui, |ui| self.tracing_section(ui));
