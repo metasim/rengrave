@@ -178,8 +178,7 @@ fn simplify(points: &[Xyz], tolerance: f64, fit_arcs: bool) -> Vec<Fitted> {
         let mut worst = 0;
         let mut min_rad = f64::MAX;
         let mut max_arc = 0;
-        for i in lo + 1..hi {
-            let p = points[i];
+        for (i, &p) in points.iter().enumerate().take(hi).skip(lo + 1) {
             let dist = dist_to_segment(start, end, p, false);
             let dist_z = dist_to_segment(start, end, p, true);
             if dist > worst_dist {

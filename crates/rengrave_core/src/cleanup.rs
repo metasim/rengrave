@@ -64,9 +64,8 @@ fn path_point(p: &Point64) -> Point {
 /// Expands polygons into closed perimeter runs, numbering loops after `last_loop`.
 fn paths_to_loops(paths: &Paths64, radius: f64, last_loop: usize) -> Vec<CarvePoint> {
     let mut out = Vec::new();
-    let mut loop_num = last_loop;
-    for path in paths {
-        loop_num += 1;
+    for (index, path) in paths.iter().enumerate() {
+        let loop_num = last_loop + index + 1;
         let n = path.len();
         if n == 0 {
             continue;

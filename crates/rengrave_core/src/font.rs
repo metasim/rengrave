@@ -329,7 +329,7 @@ fn push_cxf_arc(
 }
 
 /// Reverses a glyph whose outer contours run counter-clockwise (the CFF convention).
-fn normalize_winding(strokes: &mut Vec<Stroke>) {
+fn normalize_winding(strokes: &mut [Stroke]) {
     let doubled_area: f64 = strokes.iter().map(|s| s.x1 * s.y2 - s.x2 * s.y1).sum();
     if doubled_area > 0.0 {
         strokes.reverse();
