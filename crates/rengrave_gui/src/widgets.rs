@@ -106,6 +106,14 @@ pub trait UiExt {
     /// a tooltip. A line runs across the available width, open beneath the selected tab.
     fn tab_bar<T: Copy + PartialEq>(&mut self, value: &mut T, choices: &[(T, &str, &str)]);
 
+    /// Like `tab_bar`, with `trailing` laid out right to left at the end of the row.
+    fn tab_bar_with<T: Copy + PartialEq>(
+        &mut self,
+        value: &mut T,
+        choices: &[(T, &str, &str)],
+        trailing: impl FnOnce(&mut Ui),
+    );
+
     /// Text for a label that names a control, in the accent color.
     fn control_label(&self, text: impl Into<String>) -> RichText;
 
@@ -115,7 +123,7 @@ pub trait UiExt {
     /// A button with an icon before its text. Its accessible name is the text alone.
     fn icon_button(&mut self, enabled: bool, icon: char, text: &str) -> Response;
 
-    /// A button that switches `value` on and off, and looks like a button in both states.
+    /// A button that switches `value` on and off. Off, it is an outline with no fill.
     fn toggle_button(&mut self, value: &mut bool, text: &str) -> Response;
 
     /// A menu entry with an icon, and optionally the text of its keyboard shortcut.
@@ -142,6 +150,9 @@ pub trait UiExt {
 
     /// Lays out a two-column form with a consistent label width.
     fn form_grid(&mut self, id: &str, add: impl FnOnce(&mut Ui));
+
+    /// Like `form_grid`, but the label column is only as wide as its longest label.
+    fn compact_form_grid(&mut self, id: &str, add: impl FnOnce(&mut Ui));
 
     /// A labeled single-line text field, with a small button that restores `default`.
     fn resettable_text(&mut self, name: &str, tip: &str, value: &mut String, default: &str);
@@ -178,6 +189,15 @@ impl TabShape {
 
 impl UiExt for Ui {
     fn tab_bar<T: Copy + PartialEq>(&mut self, value: &mut T, choices: &[(T, &str, &str)]) {
+        self.tab_bar_with(value, choices, |_| {});
+    }
+
+    fn tab_bar_with<T: Copy + PartialEq>(
+        &mut self,
+        value: &mut T,
+        choices: &[(T, &str, &str)],
+        trailing: impl FnOnce(&mut Ui),
+    ) {
         let row = self.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let mut tabs = Vec::with_capacity(choices.len());
@@ -200,6 +220,7 @@ impl UiExt for Ui {
                 }
                 tabs.push((rect, response, galley, *value == choice));
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), trailing);
             tabs
         });
         let tabs = row.inner;
@@ -296,7 +317,12 @@ impl UiExt for Ui {
     }
 
     fn toggle_button(&mut self, value: &mut bool, text: &str) -> Response {
-        let mut response = self.add(egui::Button::new(text).selected(*value));
+        let mut button = egui::Button::new(text).selected(*value);
+        if !*value {
+            // An outline alone, so that it does not look like an action button.
+            button = button.fill(egui::Color32::TRANSPARENT);
+        }
+        let mut response = self.add(button);
         if response.clicked() {
             *value = !*value;
             response.mark_changed();
@@ -523,6 +549,13 @@ impl UiExt for Ui {
         egui::Grid::new(id)
             .num_columns(2)
             .min_col_width(118.0)
+            .spacing([8.0, 4.0])
+            .show(self, add);
+    }
+
+    fn compact_form_grid(&mut self, id: &str, add: impl FnOnce(&mut Ui)) {
+        egui::Grid::new(id)
+            .num_columns(2)
             .spacing([8.0, 4.0])
             .show(self, add);
     }

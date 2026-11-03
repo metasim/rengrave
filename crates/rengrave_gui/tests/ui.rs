@@ -104,6 +104,17 @@ fn settle(harness: &mut Harness<'_, RengraveApp>) {
     }
 }
 
+/// Chooses Save G-code from the File menu, whose item also shows its shortcut.
+fn save_from_menu(harness: &mut Harness<'_, RengraveApp>) {
+    click(harness, "File");
+    harness
+        .get_all_by_label_contains("Save G-code…")
+        .next()
+        .expect("the menu item")
+        .click();
+    harness.run_steps(2);
+}
+
 fn click(harness: &mut Harness<'_, RengraveApp>, label: &str) {
     // The settings panel scrolls, so make sure the widget is on screen first.
     harness.get_by_label(label).scroll_to_me();
@@ -529,7 +540,7 @@ fn finish_stock_enables_pass_depth() {
 #[test]
 fn turning_off_live_carve_waits_for_calculate() {
     let (mut harness, _) = harness();
-    click(&mut harness, "Live V-carve");
+    click(&mut harness, "Auto");
     harness.get_by_label("Height").set_value_accesskit(0.5);
     harness.run_steps(2);
     settle(&mut harness);
@@ -539,7 +550,7 @@ fn turning_off_live_carve_waits_for_calculate() {
     assert!(!app.can_write_gcode());
     assert!(app.status().text.contains("F5"));
 
-    click(&mut harness, "Calculate");
+    click(&mut harness, "Refresh");
     settle(&mut harness);
     assert!(harness.state().carve().is_some());
     assert!(harness.state().can_write_gcode());
@@ -548,7 +559,7 @@ fn turning_off_live_carve_waits_for_calculate() {
 #[test]
 fn f5_recalculates_and_escape_cancels() {
     let (mut harness, _) = harness();
-    click(&mut harness, "Live V-carve");
+    click(&mut harness, "Auto");
     harness.get_by_label("Height").set_value_accesskit(0.5);
     harness.run_steps(2);
     settle(&mut harness);
@@ -649,7 +660,7 @@ fn save_button_writes_program_matching_core() {
     let path = dir.join("out.ngc");
     let (mut harness, answers) = harness();
     answers.answer_save(&path);
-    click(&mut harness, "Save G-code…");
+    save_from_menu(&mut harness);
     let saved = std::fs::read_to_string(&path).unwrap();
     assert!(saved.starts_with("G90\n"));
     assert!(harness.state().status().text.contains("Saved"));
@@ -669,7 +680,7 @@ fn save_button_writes_program_matching_core() {
 #[test]
 fn canceling_the_save_dialog_writes_nothing() {
     let (mut harness, _) = harness();
-    click(&mut harness, "Save G-code…");
+    save_from_menu(&mut harness);
     assert!(!harness.state().status().text.contains("Saved"));
 }
 
@@ -689,7 +700,7 @@ fn ctrl_s_saves() {
 fn write_failure_is_reported() {
     let (mut harness, answers) = harness();
     answers.answer_save(Path::new("/nonexistent-dir/out.ngc"));
-    click(&mut harness, "Save G-code…");
+    save_from_menu(&mut harness);
     let status = harness.state().status();
     assert_eq!(status.level, StatusLevel::Error);
     assert!(status.text.contains("Unable to write"));
@@ -747,19 +758,7 @@ fn file_menu_saves_gcode() {
     let path = dir.join("menu.ngc");
     let (mut harness, answers) = harness();
     answers.answer_save(&path);
-    click(&mut harness, "File");
-    let items: Vec<_> = harness.get_all_by_label_contains("Save G-code…").collect();
-    assert_eq!(items.len(), 2, "the panel button and the menu item");
-    items
-        .iter()
-        .find(|node| {
-            node.accesskit_node()
-                .label()
-                .is_some_and(|l| l != "Save G-code…")
-        })
-        .expect("the menu item shows its shortcut")
-        .click();
-    harness.run_steps(2);
+    save_from_menu(&mut harness);
     assert!(path.exists());
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -865,6 +864,66 @@ fn gcode_view_shows_program_text() {
         .any(|c| matches!(c, egui::OutputCommand::CopyText(t) if t.starts_with("G90")))
         || harness.state().status().text.contains("Copied");
     assert!(copied);
+}
+
+#[test]
+fn gcode_context_menu_copies_the_program() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "G-code");
+    harness.run_steps(2);
+    harness.get_by_label("G90").click_secondary();
+    harness.run_steps(3);
+    // Nothing is selected, so only the whole program can be copied.
+    let disabled = harness
+        .get_all_by_label("Copy")
+        .filter(|node| node.accesskit_node().is_disabled())
+        .count();
+    assert_eq!(disabled, 1, "only the menu's Copy is disabled");
+    harness.get_by_label("Copy all").click();
+    harness.run_steps(2);
+    let copied = harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .any(|c| matches!(c, egui::OutputCommand::CopyText(t) if t.starts_with("G90")))
+        || harness.state().status().text.contains("Copied");
+    assert!(copied);
+}
+
+#[test]
+fn copy_shortcut_copies_the_dragged_selection() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "G-code");
+    harness.run_steps(2);
+    let first = harness.get_by_label("G90").rect();
+    // From the middle of the first line to the end of the second.
+    let start = egui::pos2(first.left() + 5.0, first.center().y);
+    let end = egui::pos2(first.left() + 60.0, first.center().y + first.height());
+    harness.hover_at(start);
+    harness.run_steps(1);
+    harness.drag_at(start);
+    harness.run_steps(1);
+    harness.hover_at(end);
+    harness.run_steps(2);
+    harness.drop_at(end);
+    harness.run_steps(1);
+    // egui-winit turns Ctrl+C (Cmd+C on macOS) into this event.
+    harness.event(egui::Event::Copy);
+    harness.run_steps(1);
+    let copied = harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            egui::OutputCommand::CopyText(t) => Some(t.clone()),
+            _ => None,
+        })
+        .expect("a copy command");
+    // The selection runs from inside the first line into the second, so it spans two lines.
+    assert_eq!(copied.lines().count(), 2, "{copied:?}");
+    assert!(copied.starts_with("90"), "{copied:?}");
 }
 
 #[test]
@@ -1131,7 +1190,7 @@ fn changed_program_restarts_the_simulation() {
 #[test]
 fn simulator_waits_while_live_carve_is_off() {
     let mut harness = simulator_harness(|_| {});
-    click(&mut harness, "Live V-carve");
+    click(&mut harness, "Auto");
     harness.state_mut().settings.y_scale = 0.5;
     harness.run_steps(1);
     settle(&mut harness);

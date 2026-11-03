@@ -4,7 +4,7 @@
 //! Application state and the top-level window layout.
 
 use crate::dialogs::{FileDialogs, FileKind};
-use crate::gcode_view::Token;
+use crate::gcode_view::{Selection, Token};
 use crate::icons;
 use crate::preview::{Preview, Scene};
 use crate::simulator::SimulatorView;
@@ -116,6 +116,8 @@ pub struct RengraveApp {
     pub active_view: ActiveView,
     /// Recalculate V-carve paths automatically after a change.
     pub live_carve: bool,
+    /// What is selected in the G-code view.
+    gcode_selection: Selection,
     /// Interactive preview state.
     pub preview: Preview,
     /// Simulator playback state.
@@ -174,6 +176,7 @@ impl RengraveApp {
             tab: Tab::Design,
             active_view: ActiveView::Preview,
             live_carve: true,
+            gcode_selection: Selection::default(),
             preview: Preview::default(),
             simulator: SimulatorView::default(),
             font_files: Vec::new(),
@@ -1003,8 +1006,9 @@ impl RengraveApp {
                 bottom: 0,
             })
             .show(ui, |ui| {
-                ui.tab_bar(
-                    &mut self.active_view,
+                let mut view = self.active_view;
+                ui.tab_bar_with(
+                    &mut view,
                     &[
                         (
                             ActiveView::Preview,
@@ -1022,7 +1026,9 @@ impl RengraveApp {
                             "The text of the G-code program",
                         ),
                     ],
+                    |ui| self.carve_controls(ui),
                 );
+                self.active_view = view;
             });
         // The tools belong to the pane, so that the tabs connect to it directly.
         egui::Frame::NONE
@@ -1035,12 +1041,14 @@ impl RengraveApp {
                         self.simulator.toolbar(ui);
                     }
                     ActiveView::Gcode => {
-                        if ui
-                            .icon_button(self.can_write_gcode(), icons::COPY, "Copy")
-                            .clicked()
-                        {
-                            self.copy_gcode();
-                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .icon_button(self.can_write_gcode(), icons::COPY, "Copy")
+                                .clicked()
+                            {
+                                self.copy_gcode();
+                            }
+                        });
                     }
                 });
             });
@@ -1120,14 +1128,69 @@ impl RengraveApp {
                 let font = egui::TextStyle::Monospace.resolve(ui.style());
                 let dark = ui.visuals().dark_mode;
                 let plain = ui.visuals().text_color();
+                let char_width = ui
+                    .painter()
+                    .layout_no_wrap("0".into(), font.clone(), plain)
+                    .size()
+                    .x;
+                let highlight = ui.visuals().selection.bg_fill;
+                if ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)))
+                    && !self.gcode_selection.is_empty()
+                {
+                    ui.ctx().copy_text(self.gcode_selection.text(&lines));
+                }
                 egui::ScrollArea::both().auto_shrink(false).show_rows(
                     ui,
                     row_height,
                     lines.len(),
                     |ui, range| {
-                        for line in &lines[range] {
+                        for index in range {
+                            let line = &lines[index];
                             let job = Token::highlight(line, &font, dark, plain);
-                            ui.add(egui::Label::new(job).extend());
+                            let galley = ui.painter().layout_job(job);
+                            let size =
+                                egui::vec2(galley.size().x.max(ui.available_width()), row_height);
+                            let (rect, row) =
+                                ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+                            // Columns are counted in characters, which are equally wide.
+                            let position = |pointer: egui::Pos2| {
+                                let rows = ((pointer.y - rect.top()) / row_height).floor() as isize;
+                                let at = index.saturating_add_signed(rows).min(lines.len() - 1);
+                                let column = ((pointer.x - rect.left()) / char_width).round();
+                                (at, column.max(0.0) as usize)
+                            };
+                            row.widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::Role::Label, true, line)
+                            });
+                            if row.hovered() {
+                                ui.set_cursor_icon(egui::CursorIcon::Text);
+                            }
+                            if let Some(pointer) = row.interact_pointer_pos() {
+                                if row.drag_started_by(egui::PointerButton::Primary) {
+                                    // A drag starts after the pointer has moved, so begin at the press.
+                                    let origin = ui.input(|i| i.pointer.press_origin());
+                                    let start = position(origin.unwrap_or(pointer));
+                                    self.gcode_selection = Selection::at(start);
+                                    self.gcode_selection.head = position(pointer);
+                                } else if row.dragged_by(egui::PointerButton::Primary) {
+                                    self.gcode_selection.head = position(pointer);
+                                }
+                            }
+                            if row.clicked_by(egui::PointerButton::Primary) {
+                                self.gcode_selection = Selection::default();
+                            }
+                            let len = line.chars().count();
+                            if let Some(columns) = self.gcode_selection.columns(index, len) {
+                                let x = rect.left() + columns.start as f32 * char_width;
+                                let width = columns.len().max(1) as f32 * char_width;
+                                let covered = egui::Rect::from_min_size(
+                                    egui::pos2(x, rect.top()),
+                                    egui::vec2(width, row_height),
+                                );
+                                ui.painter().rect_filled(covered, 0.0, highlight);
+                            }
+                            ui.painter().galley(rect.min, galley, plain);
+                            row.context_menu(|ui| self.gcode_context_menu(ui, &lines));
                         }
                     },
                 );
@@ -1135,6 +1198,24 @@ impl RengraveApp {
             Err(e) => {
                 ui.centered_and_justified(|ui| ui.colored_label(ui.visuals().error_fg_color, e));
             }
+        }
+    }
+
+    fn gcode_context_menu(&mut self, ui: &mut Ui, lines: &[String]) {
+        let has_selection = !self.gcode_selection.is_empty();
+        if ui
+            .menu_item(has_selection, icons::COPY, "Copy", None)
+            .clicked()
+        {
+            ui.ctx().copy_text(self.gcode_selection.text(lines));
+            ui.close();
+        }
+        if ui
+            .menu_item(self.can_write_gcode(), icons::COPY, "Copy all", None)
+            .clicked()
+        {
+            self.copy_gcode();
+            ui.close();
         }
     }
 
