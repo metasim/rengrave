@@ -8,7 +8,6 @@
 
 use crate::app::{RengraveApp, StatusLevel, Tab};
 use crate::icons;
-use crate::style::Look;
 use crate::widgets::{Form, Number, UiExt};
 use egui::{CollapsingHeader, Grid, Ui};
 use rengrave_core::{
@@ -33,10 +32,6 @@ impl RengraveApp {
         );
         ui.add_space(6.0);
 
-        // Reserve room for the fixed action area at the bottom.
-        egui::Panel::bottom("inspector_actions")
-            .frame(egui::Frame::NONE)
-            .show(ui, |ui| self.actions(ui));
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| match self.tab {
@@ -46,49 +41,32 @@ impl RengraveApp {
             });
     }
 
-    fn actions(&mut self, ui: &mut Ui) {
-        ui.add_space(6.0);
-        if self.settings.cut_type == CutType::VCarve {
-            ui.horizontal(|ui| {
-                let live = ui
-                    .checkbox(&mut self.live_carve, "Live V-carve")
-                    .on_hover_text(
-                        "Recalculate paths after every change. Turn off for very large designs.",
-                    );
-                if live.changed()
-                    && self.live_carve
-                    && self.carve_is_stale()
-                    && self.issues.is_empty()
-                {
-                    self.recalculate(true);
-                }
-                let can_calc = self.issues.is_empty();
-                if ui
-                    .icon_button(can_calc, icons::CALCULATE, "Calculate")
-                    .on_hover_text("Reload the source file and calculate V-carve paths now (F5)")
-                    .clicked()
-                {
-                    self.reload_and_recalculate();
-                }
-            });
+    /// The V-carve recalculation controls, which sit in the toolbar beside the view tabs.
+    pub(crate) fn carve_controls(&mut self, ui: &mut Ui) {
+        if self.settings.cut_type != CutType::VCarve {
+            return;
         }
-        let enabled = self.can_write_gcode();
-        let save = egui::Button::new((
-            Look::icon(icons::SAVE).color(ui.visuals().selection.stroke.color),
-            Look::bold("Save G-code…").color(ui.visuals().selection.stroke.color),
-        ))
-        .fill(ui.visuals().selection.bg_fill)
-        .min_size(egui::vec2(ui.available_width(), 30.0));
-        let response = ui.add_enabled(enabled, save);
-        response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, "Save G-code…"));
-        if response
-            .on_disabled_hover_text("Waiting for toolpaths, or settings need attention.")
-            .clicked()
-        {
-            self.save_gcode();
-        }
-        ui.add_space(6.0);
+        // Compact, so that the controls fit inside the height of the tabs.
+        ui.compact(|ui| {
+            // Laid out right to left, so the last control added is the leftmost.
+            // With Auto on, paths are always current, so there is nothing to refresh.
+            let can_refresh = self.issues.is_empty() && !self.live_carve;
+            if ui
+                .icon_button(can_refresh, icons::CALCULATE, "Refresh")
+                .on_hover_text("Reload the source file and calculate V-carve paths now (F5)")
+                .on_disabled_hover_text("Paths update automatically while Auto is on")
+                .clicked()
+            {
+                self.reload_and_recalculate();
+            }
+            let auto = ui.checkbox(&mut self.live_carve, "Auto").on_hover_text(
+                "Recalculate V-carve paths after every change. Turn off for very large designs.",
+            );
+            if auto.changed() && self.live_carve && self.carve_is_stale() && self.issues.is_empty()
+            {
+                self.recalculate(true);
+            }
+        });
     }
 
     fn design_tab(&mut self, ui: &mut Ui) {
@@ -209,7 +187,13 @@ impl RengraveApp {
                 |n| n.to_string_lossy().into_owned(),
             );
             ui.label(name);
-            if ui.icon_button(true, icons::OPEN, "Open…").clicked() {
+            if ui
+                .icon_button(true, icons::OPEN, "Open…")
+                .on_hover_text(
+                    "DXF, PNG, BMP, PBM, JPEG, GIF, or TIFF. You can also drop a file on the window.",
+                )
+                .clicked()
+            {
                 self.open_image_dialog();
             }
             if ui
@@ -220,7 +204,6 @@ impl RengraveApp {
                 self.reload_and_recalculate();
             }
         });
-        ui.weak("DXF, PNG, BMP, PBM, JPEG, GIF, or TIFF. You can also drop a file on the window.");
         CollapsingHeader::new(ui.section_heading("Bitmap tracing"))
             .show(ui, |ui| self.tracing_section(ui));
     }
@@ -437,7 +420,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        ui.form_grid("position_grid", |ui| {
+        ui.compact_form_grid("position_grid", |ui| {
             form.length(
                 ui,
                 "X offset",
