@@ -142,35 +142,6 @@ pub struct RengraveApp {
     keep_notice: bool,
 }
 
-/// Returns a copy with fields that do not affect toolpaths cleared, for detecting real changes.
-fn toolpath_inputs(settings: &Settings) -> Settings {
-    let d = Settings::default();
-    Settings {
-        show_axis: d.show_axis,
-        show_box: d.show_box,
-        show_thick: d.show_thick,
-        show_v_path: d.show_v_path,
-        show_v_area: d.show_v_area,
-        feed: d.feed,
-        plunge: d.plunge,
-        z_safe: d.z_safe,
-        z_cut: d.z_cut,
-        arc_fit: d.arc_fit,
-        g_pre: d.g_pre,
-        g_post: d.g_post,
-        disable_variables: d.disable_variables,
-        no_comments: d.no_comments,
-        v_rough_stock: d.v_rough_stock,
-        v_max_cut: d.v_max_cut,
-        clean_dia: d.clean_dia,
-        clean_step: d.clean_step,
-        clean_v: d.clean_v,
-        clean_straight: d.clean_straight,
-        clean_v_bit: d.clean_v_bit,
-        ..settings.clone()
-    }
-}
-
 impl RengraveApp {
     /// Creates the application, using `dialogs` to ask for files.
     pub fn new(ctx: egui::Context, dialogs: Box<dyn FileDialogs>) -> Self {
@@ -254,7 +225,10 @@ impl RengraveApp {
             return false;
         }
         match &self.requested {
-            Some(requested) => toolpath_inputs(requested) != toolpath_inputs(&self.settings),
+            Some(requested) => {
+                RengraveApp::toolpath_inputs(requested)
+                    != RengraveApp::toolpath_inputs(&self.settings)
+            }
             None => true,
         }
     }
@@ -1055,6 +1029,37 @@ impl RengraveApp {
     }
 }
 
+impl RengraveApp {
+    /// Returns a copy with fields that do not affect toolpaths cleared, for detecting real changes.
+    fn toolpath_inputs(settings: &Settings) -> Settings {
+        let d = Settings::default();
+        Settings {
+            show_axis: d.show_axis,
+            show_box: d.show_box,
+            show_thick: d.show_thick,
+            show_v_path: d.show_v_path,
+            show_v_area: d.show_v_area,
+            feed: d.feed,
+            plunge: d.plunge,
+            z_safe: d.z_safe,
+            z_cut: d.z_cut,
+            arc_fit: d.arc_fit,
+            g_pre: d.g_pre,
+            g_post: d.g_post,
+            disable_variables: d.disable_variables,
+            no_comments: d.no_comments,
+            v_rough_stock: d.v_rough_stock,
+            v_max_cut: d.v_max_cut,
+            clean_dia: d.clean_dia,
+            clean_step: d.clean_step,
+            clean_v: d.clean_v,
+            clean_straight: d.clean_straight,
+            clean_v_bit: d.clean_v_bit,
+            ..settings.clone()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1068,11 +1073,11 @@ mod tests {
             g_post: "M30".into(),
             ..base.clone()
         };
-        assert!(toolpath_inputs(&base) == toolpath_inputs(&cosmetic));
+        assert!(RengraveApp::toolpath_inputs(&base) == RengraveApp::toolpath_inputs(&cosmetic));
         let real = Settings {
             y_scale: 3.0,
             ..base.clone()
         };
-        assert!(toolpath_inputs(&base) != toolpath_inputs(&real));
+        assert!(RengraveApp::toolpath_inputs(&base) != RengraveApp::toolpath_inputs(&real));
     }
 }

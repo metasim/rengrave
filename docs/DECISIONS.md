@@ -64,6 +64,14 @@ clear defects, so the port deliberately does not reproduce them:
 - DXF: `SOLID` entities raised an error that aborted the whole import. They are drawn.
 - DXF: `CIRCLE` overshot its start point for tolerances that do not divide 360. It closes exactly.
 - DXF: one damaged entity lost the whole drawing. Now it is skipped and reported.
+- DXF: `LWPOLYLINE` treated any nonzero flag as closed, so `PLINEGEN` (128) closed open polylines.
+  Only bit 1 closes one now. Bulges also stay aligned when vertices carry width codes.
+- DXF: unclamped splines were evaluated outside their domain. They are evaluated over it now, and
+  invalid knot vectors are rejected.
+- A V-bit angle of 0 raised an exception during G-code generation. It now fails validation, as
+  does 180, and any `NaN` or infinite value.
+- Validation stopped all output for settings unused by the job, such as a zero box gap with no box.
+  Only settings that apply are checked now.
 - Text: center/right justification did nothing in batch mode, because the last line was only
   measured if followed by a newline. All lines are measured in all modes.
 - Fonts: cubic curves were reduced to one chord, and CFF (`.otf`) winding was not normalized.

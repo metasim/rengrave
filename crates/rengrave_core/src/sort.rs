@@ -14,6 +14,32 @@ pub struct PathRange {
 }
 
 impl PathRange {
+    /// Orders loops greedily, from each loop's end to the nearest remaining beginning.
+    ///
+    /// Takes each loop's beginning and end point, and returns loop indices in visiting order.
+    /// Loop 0 always comes first.
+    pub fn order_by_begin(begins: &[(f64, f64)], ends: &[(f64, f64)]) -> Vec<usize> {
+        let mut remaining: Vec<usize> = (0..begins.len()).collect();
+        let mut order = Vec::with_capacity(begins.len());
+        let mut next = 0;
+        while !remaining.is_empty() {
+            let k = remaining.remove(next);
+            order.push(k);
+            let cur = ends[k];
+            let mut best = f64::INFINITY;
+            next = 0;
+            for (j, &candidate) in remaining.iter().enumerate() {
+                let p = begins[candidate];
+                let d = (cur.0 - p.0).powi(2) + (cur.1 - p.1).powi(2);
+                if d < best {
+                    best = d;
+                    next = j;
+                }
+            }
+        }
+        order
+    }
+
     /// Iterates over the indices in traversal order.
     pub fn indices(self) -> Box<dyn Iterator<Item = usize>> {
         if self.start > self.end {
@@ -306,34 +332,18 @@ impl Segment {
         }
 
         // Order loops by distance from the end of one to the beginning of the next.
-        let mut remaining: Vec<usize> = (0..loop_count).collect();
-        let mut order: Vec<(usize, usize, usize)> = Vec::with_capacity(loop_count);
-        let directed = |k: usize| {
-            if flip[k] {
-                (loop_end[k], loop_begin[k], k)
-            } else {
-                (loop_begin[k], loop_end[k], k)
-            }
-        };
-        if loop_count > 0 {
-            order.push(directed(0));
-        }
-        let mut next = 0;
-        while remaining.len() > 1 {
-            let k = remaining.remove(next);
-            let cur = pts[loop_end[k]];
-            let mut best = f64::INFINITY;
-            next = 0;
-            for (j, &candidate) in remaining.iter().enumerate() {
-                let p = pts[loop_begin[candidate]];
-                let d = (cur.x - p.x).powi(2) + (cur.y - p.y).powi(2);
-                if d < best {
-                    best = d;
-                    next = j;
+        let begins: Vec<(f64, f64)> = loop_begin.iter().map(|&i| (pts[i].x, pts[i].y)).collect();
+        let ends: Vec<(f64, f64)> = loop_end.iter().map(|&i| (pts[i].x, pts[i].y)).collect();
+        let order: Vec<(usize, usize, usize)> = PathRange::order_by_begin(&begins, &ends)
+            .into_iter()
+            .map(|k| {
+                if flip[k] {
+                    (loop_end[k], loop_begin[k], k)
+                } else {
+                    (loop_begin[k], loop_end[k], k)
                 }
-            }
-            order.push(directed(remaining[next]));
-        }
+            })
+            .collect();
 
         // Emit segments, merging points closer than ZERO into the following segment.
         let mut out: Vec<Segment> = Vec::with_capacity(pts.len());
@@ -583,6 +593,14 @@ mod tests {
             PathRange::order_loops(&one, |p| (p.0, p.1), |p| p.2),
             [PathRange { start: 0, end: 0 }]
         );
+    }
+
+    #[test]
+    fn order_by_begin_follows_nearest_beginnings() {
+        let begins = [(0.0, 0.0), (50.0, 0.0), (2.0, 0.0)];
+        let ends = [(1.0, 0.0), (51.0, 0.0), (3.0, 0.0)];
+        assert_eq!(PathRange::order_by_begin(&begins, &ends), [0, 2, 1]);
+        assert!(PathRange::order_by_begin(&[], &[]).is_empty());
     }
 
     #[test]

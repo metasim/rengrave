@@ -147,89 +147,6 @@ impl Bitmap {
     }
 }
 
-/// Drops pixel-staircase vertices from a closed loop with Douglas-Peucker simplification.
-fn simplify_loop(points: &[(f64, f64)], tolerance: f64) -> Vec<(f64, f64)> {
-    if points.len() < 4 {
-        return points.to_vec();
-    }
-    let dist2 = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).powi(2) + (a.1 - b.1).powi(2);
-    // Split the loop at the two mutually distant points, so each half is a simple chain.
-    let far = (1..points.len())
-        .max_by(|&i, &j| dist2(points[0], points[i]).total_cmp(&dist2(points[0], points[j])))
-        .unwrap_or(1);
-    let mut keep = vec![false; points.len()];
-    keep[0] = true;
-    keep[far] = true;
-    let n = points.len();
-    let mut stack = vec![(0_usize, far), (far, n)];
-    while let Some((lo, hi)) = stack.pop() {
-        let a = points[lo];
-        let b = points[hi % n];
-        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-        let len = dx.hypot(dy);
-        let mut worst = 0.0;
-        let mut worst_i = None;
-        for (i, p) in points.iter().enumerate().take(hi).skip(lo + 1) {
-            let d = if len == 0.0 {
-                (p.0 - a.0).hypot(p.1 - a.1)
-            } else {
-                ((p.0 - a.0) * dy - (p.1 - a.1) * dx).abs() / len
-            };
-            if d > worst {
-                worst = d;
-                worst_i = Some(i);
-            }
-        }
-        if worst > tolerance
-            && let Some(i) = worst_i
-        {
-            keep[i] = true;
-            stack.push((lo, i));
-            stack.push((i, hi));
-        }
-    }
-    points
-        .iter()
-        .zip(&keep)
-        .filter(|&(_, &k)| k)
-        .map(|(&p, _)| p)
-        .collect()
-}
-
-/// Corner-cuts gentle vertices of a closed loop; turns sharper than `max_turn_deg` stay sharp.
-fn smooth_loop(points: &[(f64, f64)], max_turn_deg: f64) -> Vec<(f64, f64)> {
-    let n = points.len();
-    if n < 3 {
-        return points.to_vec();
-    }
-    let mut out = Vec::with_capacity(n * 2);
-    for i in 0..n {
-        let prev = points[(i + n - 1) % n];
-        let cur = points[i];
-        let next = points[(i + 1) % n];
-        let a = (cur.0 - prev.0, cur.1 - prev.1);
-        let b = (next.0 - cur.0, next.1 - cur.1);
-        let turn = (a.0 * b.1 - a.1 * b.0).atan2(a.0 * b.0 + a.1 * b.1).abs();
-        if turn.to_degrees() <= max_turn_deg {
-            out.push((cur.0 - a.0 * 0.25, cur.1 - a.1 * 0.25));
-            out.push((cur.0 + b.0 * 0.25, cur.1 + b.1 * 0.25));
-        } else {
-            out.push(cur);
-        }
-    }
-    out
-}
-
-fn loop_area(points: &[(i32, i32)]) -> f64 {
-    let mut doubled = 0_i64;
-    for i in 0..points.len() {
-        let a = points[i];
-        let b = points[(i + 1) % points.len()];
-        doubled += i64::from(a.0) * i64::from(b.1) - i64::from(b.0) * i64::from(a.1);
-    }
-    doubled as f64 / 2.0
-}
-
 impl Bitmap {
     /// Traces the bitmap to closed outlines in pixel units.
     ///
@@ -249,19 +166,19 @@ impl Bitmap {
         let max_turn = alpha_max.clamp(0.0, 4.0 / 3.0) * 60.0;
         let mut strokes = Vec::new();
         for pixel_loop in self.boundary_loops(policy) {
-            if loop_area(&pixel_loop).abs() <= turd_size {
+            if Bitmap::loop_area(&pixel_loop).abs() <= turd_size {
                 continue;
             }
             let as_float: Vec<(f64, f64)> = pixel_loop
                 .iter()
                 .map(|&(x, y)| (f64::from(x), f64::from(y)))
                 .collect();
-            let mut outline = simplify_loop(&as_float, tolerance);
+            let mut outline = Bitmap::simplify_loop(&as_float, tolerance);
             if outline.len() < 3 {
                 outline = as_float;
             }
             if max_turn > 0.0 {
-                outline = smooth_loop(&smooth_loop(&outline, max_turn), max_turn);
+                outline = Bitmap::smooth_loop(&Bitmap::smooth_loop(&outline, max_turn), max_turn);
             }
             for i in 0..outline.len() {
                 let a = outline[i];
@@ -390,6 +307,91 @@ impl ImportedDrawing {
     }
 }
 
+impl Bitmap {
+    /// Drops pixel-staircase vertices from a closed loop with Douglas-Peucker simplification.
+    fn simplify_loop(points: &[(f64, f64)], tolerance: f64) -> Vec<(f64, f64)> {
+        if points.len() < 4 {
+            return points.to_vec();
+        }
+        let dist2 = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).powi(2) + (a.1 - b.1).powi(2);
+        // Split the loop at the two mutually distant points, so each half is a simple chain.
+        let far = (1..points.len())
+            .max_by(|&i, &j| dist2(points[0], points[i]).total_cmp(&dist2(points[0], points[j])))
+            .unwrap_or(1);
+        let mut keep = vec![false; points.len()];
+        keep[0] = true;
+        keep[far] = true;
+        let n = points.len();
+        let mut stack = vec![(0_usize, far), (far, n)];
+        while let Some((lo, hi)) = stack.pop() {
+            let a = points[lo];
+            let b = points[hi % n];
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let len = dx.hypot(dy);
+            let mut worst = 0.0;
+            let mut worst_i = None;
+            for (i, p) in points.iter().enumerate().take(hi).skip(lo + 1) {
+                let d = if len == 0.0 {
+                    (p.0 - a.0).hypot(p.1 - a.1)
+                } else {
+                    ((p.0 - a.0) * dy - (p.1 - a.1) * dx).abs() / len
+                };
+                if d > worst {
+                    worst = d;
+                    worst_i = Some(i);
+                }
+            }
+            if worst > tolerance
+                && let Some(i) = worst_i
+            {
+                keep[i] = true;
+                stack.push((lo, i));
+                stack.push((i, hi));
+            }
+        }
+        points
+            .iter()
+            .zip(&keep)
+            .filter(|&(_, &k)| k)
+            .map(|(&p, _)| p)
+            .collect()
+    }
+
+    /// Corner-cuts gentle vertices of a closed loop; turns sharper than `max_turn_deg` stay sharp.
+    fn smooth_loop(points: &[(f64, f64)], max_turn_deg: f64) -> Vec<(f64, f64)> {
+        let n = points.len();
+        if n < 3 {
+            return points.to_vec();
+        }
+        let mut out = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            let prev = points[(i + n - 1) % n];
+            let cur = points[i];
+            let next = points[(i + 1) % n];
+            let a = (cur.0 - prev.0, cur.1 - prev.1);
+            let b = (next.0 - cur.0, next.1 - cur.1);
+            let turn = (a.0 * b.1 - a.1 * b.0).atan2(a.0 * b.0 + a.1 * b.1).abs();
+            if turn.to_degrees() <= max_turn_deg {
+                out.push((cur.0 - a.0 * 0.25, cur.1 - a.1 * 0.25));
+                out.push((cur.0 + b.0 * 0.25, cur.1 + b.1 * 0.25));
+            } else {
+                out.push(cur);
+            }
+        }
+        out
+    }
+
+    fn loop_area(points: &[(i32, i32)]) -> f64 {
+        let mut doubled = 0_i64;
+        for i in 0..points.len() {
+            let a = points[i];
+            let b = points[(i + 1) % points.len()];
+            doubled += i64::from(a.0) * i64::from(b.1) - i64::from(b.0) * i64::from(a.1);
+        }
+        doubled as f64 / 2.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,7 +434,7 @@ mod tests {
         let b = bitmap(&["#####", "#...#", "#...#", "#...#", "#####"]);
         let loops = b.boundary_loops(TurnPolicy::Minority);
         assert_eq!(loops.len(), 2);
-        let mut areas: Vec<f64> = loops.iter().map(|l| loop_area(l)).collect();
+        let mut areas: Vec<f64> = loops.iter().map(|l| Bitmap::loop_area(l)).collect();
         areas.sort_by(f64::total_cmp);
         assert_abs_diff_eq!(areas[0], -25.0);
         assert_abs_diff_eq!(areas[1], 9.0);
@@ -486,9 +488,9 @@ mod tests {
     fn smoothing_cuts_gentle_corners_only() {
         let octagon_like = [(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)];
         // Right-angle corners survive a 45-degree threshold...
-        assert_eq!(smooth_loop(&octagon_like, 45.0).len(), 4);
+        assert_eq!(Bitmap::smooth_loop(&octagon_like, 45.0).len(), 4);
         // ...and are cut at 90 degrees.
-        assert_eq!(smooth_loop(&octagon_like, 90.0).len(), 8);
+        assert_eq!(Bitmap::smooth_loop(&octagon_like, 90.0).len(), 8);
     }
 
     #[test]

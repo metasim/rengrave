@@ -446,99 +446,100 @@ impl JobArgs {
     }
 }
 
-fn write_output(path: Option<&Path>, lines: &[String]) -> Result<(), String> {
-    let mut text = lines.join("\n");
-    text.push('\n');
-    match path {
-        Some(p) if p != Path::new("-") => {
-            std::fs::write(p, text).map_err(|e| format!("{}: {e}", p.display()))
-        }
-        _ => std::io::stdout()
-            .write_all(text.as_bytes())
-            .map_err(|e| format!("standard output: {e}")),
-    }
-}
-
-/// Warns about characters that the font could not supply.
-fn warn_missing(job: &Job) {
-    if let Ok(design) = job.layout()
-        && !design.missing_chars.is_empty()
-    {
-        let list: String = design.missing_chars.iter().collect();
-        eprintln!("warning: characters not in font: {list}");
-    }
-}
-
-fn describe_font(label: &str, font: &Font) {
-    println!("{label}  ({} characters)", font.glyphs.len());
-}
-
-fn run(cli: Cli) -> Result<(), String> {
-    match cli.command {
-        Command::Gcode(out) => {
-            let job = out.job.job()?;
-            warn_missing(&job);
-            let program = job
-                .generate_gcode(&out.job.progress())
-                .map_err(|e| e.to_string())?;
-            write_output(out.output.as_deref(), &program)
-        }
-        Command::Cleanup { tool, output } => {
-            let job = output.job.job()?;
-            let bit = match tool {
-                CliCleanupBit::Straight => CleanupBit::Straight,
-                CliCleanupBit::VBit => CleanupBit::VBit,
-            };
-            let program = job
-                .generate_cleanup_gcode(bit, &output.job.progress())
-                .map_err(|e| e.to_string())?;
-            write_output(output.output.as_deref(), &program)
-        }
-        Command::Svg(out) => {
-            let job = out.job.job()?;
-            warn_missing(&job);
-            let design = job.layout().map_err(|e| e.to_string())?;
-            write_output(out.output.as_deref(), &design.to_svg(&job.settings))
-        }
-        Command::Dxf {
-            close_loops,
-            output,
-        } => {
-            let job = output.job.job()?;
-            warn_missing(&job);
-            let design = job.layout().map_err(|e| e.to_string())?;
-            write_output(
-                output.output.as_deref(),
-                &design.to_dxf(&job.settings, close_loops),
-            )
-        }
-        Command::Settings(out) => {
-            let settings = out.job.settings()?;
-            write_output(
-                out.output.as_deref(),
-                &GcodeProgram::settings_file(&settings),
-            )
-        }
-        Command::Fonts { dir } => {
-            for builtin in BuiltinFont::ALL {
-                let font = builtin.load(5.0, false).map_err(|e| e.to_string())?;
-                describe_font(&format!("(built-in) {}", builtin.name()), &font);
+impl OutputArgs {
+    fn write(&self, lines: &[String]) -> Result<(), String> {
+        let path = self.output.as_deref();
+        let mut text = lines.join("\n");
+        text.push('\n');
+        match path {
+            Some(p) if p != Path::new("-") => {
+                std::fs::write(p, text).map_err(|e| format!("{}: {e}", p.display()))
             }
-            if let Some(dir) = dir {
-                for path in Font::list_files(&dir).map_err(|e| e.to_string())? {
-                    match Font::load_file(&path, 5.0, false) {
-                        Ok(font) => describe_font(&path.display().to_string(), &font),
-                        Err(e) => eprintln!("warning: {e}"),
+            _ => std::io::stdout()
+                .write_all(text.as_bytes())
+                .map_err(|e| format!("standard output: {e}")),
+        }
+    }
+}
+
+impl JobArgs {
+    /// Warns about characters that the font could not supply.
+    fn warn_missing(job: &Job) {
+        if let Ok(design) = job.layout()
+            && !design.missing_chars.is_empty()
+        {
+            let list: String = design.missing_chars.iter().collect();
+            eprintln!("warning: characters not in font: {list}");
+        }
+    }
+}
+
+impl Cli {
+    fn describe_font(label: &str, font: &Font) {
+        println!("{label}  ({} characters)", font.glyphs.len());
+    }
+
+    fn run(self) -> Result<(), String> {
+        match self.command {
+            Command::Gcode(out) => {
+                let job = out.job.job()?;
+                JobArgs::warn_missing(&job);
+                let program = job
+                    .generate_gcode(&out.job.progress())
+                    .map_err(|e| e.to_string())?;
+                out.write(&program)
+            }
+            Command::Cleanup { tool, output } => {
+                let job = output.job.job()?;
+                let bit = match tool {
+                    CliCleanupBit::Straight => CleanupBit::Straight,
+                    CliCleanupBit::VBit => CleanupBit::VBit,
+                };
+                let program = job
+                    .generate_cleanup_gcode(bit, &output.job.progress())
+                    .map_err(|e| e.to_string())?;
+                output.write(&program)
+            }
+            Command::Svg(out) => {
+                let job = out.job.job()?;
+                JobArgs::warn_missing(&job);
+                let design = job.layout().map_err(|e| e.to_string())?;
+                out.write(&design.to_svg(&job.settings))
+            }
+            Command::Dxf {
+                close_loops,
+                output,
+            } => {
+                let job = output.job.job()?;
+                JobArgs::warn_missing(&job);
+                let design = job.layout().map_err(|e| e.to_string())?;
+                output.write(&design.to_dxf(&job.settings, close_loops))
+            }
+            Command::Settings(out) => {
+                let settings = out.job.settings()?;
+                out.write(&GcodeProgram::settings_file(&settings))
+            }
+            Command::Fonts { dir } => {
+                for builtin in BuiltinFont::ALL {
+                    let font = builtin.load(5.0, false).map_err(|e| e.to_string())?;
+                    Self::describe_font(&format!("(built-in) {}", builtin.name()), &font);
+                }
+                if let Some(dir) = dir {
+                    for path in Font::list_files(&dir).map_err(|e| e.to_string())? {
+                        match Font::load_file(&path, 5.0, false) {
+                            Ok(font) => Self::describe_font(&path.display().to_string(), &font),
+                            Err(e) => eprintln!("warning: {e}"),
+                        }
                     }
                 }
+                Ok(())
             }
-            Ok(())
         }
     }
 }
 
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
+    match Cli::parse().run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("error: {message}");
