@@ -54,3 +54,22 @@ The original's batch mode (`-b`) runs headless once `tkinter` and `pyclipper` ar
 Reference G-code generated that way is committed under
 `crates/rengrave_core/tests/parity/` and the port must reproduce it line for line. The stub
 harness lives in `tools/parity/`.
+
+## D8. Deliberate differences from the original's behavior
+
+Parity tests pin the original's G-code wherever behavior is well defined. The following are
+clear defects, so the port deliberately does not reproduce them:
+
+- CXF: a stroke on the last line of a file was dropped. It is kept.
+- DXF: `SOLID` entities raised an error that aborted the whole import. They are drawn.
+- DXF: `CIRCLE` overshot its start point for tolerances that do not divide 360. It closes exactly.
+- DXF: one damaged entity lost the whole drawing. Now it is skipped and reported.
+- Text: center/right justification did nothing in batch mode, because the last line was only
+  measured if followed by a newline. All lines are measured in all modes.
+- Fonts: cubic curves were reduced to one chord, and CFF (`.otf`) winding was not normalized.
+- Python exceptions such as a zero-length chord in arc fitting are handled as "no arc".
+- Multiple adjacent identical settings keys parse by exact name, not substring match, so a value
+  for `v_bit_dia` cannot be captured by another key that happens to contain the same text.
+
+The G-code comment header names rengrave instead of F-Engrave, and `gpre`/`gpost` values read
+from a settings file no longer gain a trailing space.
