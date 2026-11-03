@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from the potrace invocation in `Read_image_file` of F-Engrave 1.78. The native tracer is new.
+
 //! Converts raster images to outline strokes, natively or with the external `potrace` program.
 
 use crate::dxf::DxfDrawing;

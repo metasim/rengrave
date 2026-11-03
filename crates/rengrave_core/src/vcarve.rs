@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from `V_Carve_It` and `find_max_circle` of F-Engrave 1.78.
+
 //! V-carve toolpath calculation.
 //!
 //! At each sample along an outline, the engine finds the largest circle tangent to the outline

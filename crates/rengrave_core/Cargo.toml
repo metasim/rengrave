@@ -14,6 +14,10 @@ clipper2-rust.workspace = true
 ttf-parser.workspace = true
 image.workspace = true
 epaint_default_fonts.workspace = true
+glam = "0.34"
+warp-gcode = { path = "../../vendor/warp-gcode" }
+warp-sim = { path = "../../vendor/warp-sim" }
+warp-tools = { path = "../../vendor/warp-tools" }
 
 [dev-dependencies]
 approx.workspace = true

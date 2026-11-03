@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from `Read_font_file` and `Read_image_file` of F-Engrave 1.78.
+
 //! The high-level interface: settings plus loaded source glyphs.
 
 use crate::cleanup::CleanupPaths;

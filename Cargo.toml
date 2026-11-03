@@ -25,3 +25,7 @@ approx = "0.5"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Stamping the tool into the stock is the hot path of the simulator.
+[profile.dev.package.warp-sim]
+opt-level = 3

@@ -1,8 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! Application state and the top-level window layout.
 
 use crate::dialogs::{FileDialogs, FileKind};
 use crate::gcode_view::Token;
 use crate::preview::{Preview, Scene};
+use crate::simulator::SimulatorView;
 use crate::worker::{Update, Worker};
 use egui::{CentralPanel, Key, KeyboardShortcut, Modifiers, Panel, RichText, Ui};
 use rengrave_core::font::{Font, extension_upper};
@@ -39,6 +43,8 @@ pub enum ActiveView {
     Preview,
     /// The text of the G-code program.
     Gcode,
+    /// The simulated program, cutting into stock.
+    Simulator,
 }
 
 /// Severity of the message in the status bar.
@@ -109,6 +115,8 @@ pub struct RengraveApp {
     pub live_carve: bool,
     /// Interactive preview state.
     pub preview: Preview,
+    /// Simulator playback state.
+    pub simulator: SimulatorView,
     pub(crate) font_files: Vec<PathBuf>,
     /// The directory `font_files` came from.
     scanned_font_dir: Option<PathBuf>,
@@ -163,6 +171,7 @@ impl RengraveApp {
             active_view: ActiveView::Preview,
             live_carve: true,
             preview: Preview::default(),
+            simulator: SimulatorView::default(),
             font_files: Vec::new(),
             scanned_font_dir: None,
             font_filter: String::new(),
@@ -304,6 +313,10 @@ impl RengraveApp {
             if !design.missing_chars.is_empty() {
                 let chars: String = design.missing_chars.iter().collect();
                 text.push_str(&format!(". Not in font: {chars}"));
+                return status(StatusLevel::Warning, text);
+            }
+            if let Some(issue) = self.settings.controller_issues().first() {
+                text.push_str(&format!(". {issue}"));
                 return status(StatusLevel::Warning, text);
             }
             if let Some(warning) = self.warnings.first() {
@@ -924,7 +937,7 @@ impl RengraveApp {
                 self.settings.set_units(units);
                 ui.separator();
                 if let Some((x, y)) = self.preview.hover_position
-                    && self.active_view == ActiveView::Preview
+                    && self.active_view != ActiveView::Gcode
                 {
                     let d = self.settings.units.coord_decimals();
                     ui.monospace(format!("X {x:.d$}  Y {y:.d$}"));
@@ -939,10 +952,16 @@ impl RengraveApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.active_view, ActiveView::Preview, "Preview");
+                    ui.selectable_value(&mut self.active_view, ActiveView::Simulator, "Simulate")
+                        .on_hover_text("Play the G-code program and see what it cuts");
                     ui.selectable_value(&mut self.active_view, ActiveView::Gcode, "G-code");
                     ui.separator();
                     match self.active_view {
                         ActiveView::Preview => self.preview_toolbar(ui),
+                        ActiveView::Simulator => {
+                            self.fit_button(ui);
+                            self.simulator.toolbar(ui);
+                        }
                         ActiveView::Gcode => {
                             if ui
                                 .add_enabled(self.can_write_gcode(), egui::Button::new("Copy"))
@@ -966,10 +985,35 @@ impl RengraveApp {
                     .show(ui, &scene, &self.settings, self.scene_revision);
             }
             ActiveView::Gcode => self.gcode_view(ui),
+            ActiveView::Simulator => self.simulator_view(ui),
         }
     }
 
-    fn preview_toolbar(&mut self, ui: &mut Ui) {
+    fn simulator_view(&mut self, ui: &mut Ui) {
+        if self.settings_are_pending() || self.busy {
+            ui.centered_and_justified(|ui| ui.label("Waiting for toolpaths…"));
+            return;
+        }
+        if self.carve_is_stale() {
+            ui.centered_and_justified(|ui| ui.label("V-carve paths are not calculated."));
+            return;
+        }
+        let Some(design) = self.design.clone() else {
+            return;
+        };
+        match self.gcode() {
+            Ok(lines) => {
+                self.simulator.load(&lines, &design, &self.settings);
+                self.simulator
+                    .show(ui, &mut self.preview, &design, &lines, &self.settings);
+            }
+            Err(e) => {
+                ui.centered_and_justified(|ui| ui.colored_label(ui.visuals().error_fg_color, e));
+            }
+        }
+    }
+
+    fn fit_button(&mut self, ui: &mut Ui) {
         if ui
             .add_enabled(!self.preview.is_fitted(), egui::Button::new("Fit"))
             .on_hover_text("Fit the design in the window (double-click the preview)")
@@ -977,6 +1021,10 @@ impl RengraveApp {
         {
             self.preview.fit();
         }
+    }
+
+    fn preview_toolbar(&mut self, ui: &mut Ui) {
+        self.fit_button(ui);
         if self.settings.cut_type == CutType::VCarve {
             ui.toggle_value(&mut self.settings.show_v_area, "Area")
                 .on_hover_text("Show the area cut by the V-bit");

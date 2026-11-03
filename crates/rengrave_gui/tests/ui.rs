@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! Smoke and interaction tests of the whole application under `egui_kittest`.
 //!
 //! The harness steps the real `RengraveApp`, finding widgets through the accessibility tree the
@@ -153,6 +156,9 @@ fn every_tab_renders_in_every_mode() {
                     }
                     harness.state_mut().active_view = ActiveView::Gcode;
                     harness.run_steps(2);
+                    harness.state_mut().active_view = ActiveView::Simulator;
+                    harness.run_steps(2);
+                    assert!(harness.state().simulator.simulation().is_some());
                     harness.check_accessibility();
                 }
             }
@@ -845,6 +851,284 @@ fn gcode_view_highlights_syntax_and_keeps_the_text() {
     let comment = colors_of("( Code generated");
     assert_eq!(comment.len(), 1, "a comment is a single span");
     assert_ne!(comment[0], rapid[0]);
+}
+
+#[test]
+fn header_unsupported_by_fluidnc_is_flagged_and_fixable() {
+    let (mut harness, _) = harness();
+    assert!(harness.state().settings.controller_issues().is_empty());
+
+    harness.state_mut().settings.g_pre = "G17 G64 P0.001 M3 S3000".into();
+    harness.run_steps(2);
+    let status = harness.state().status();
+    assert_eq!(status.level, StatusLevel::Warning);
+    assert!(status.text.contains("G64"), "{}", status.text);
+
+    click(&mut harness, "Output");
+    click(&mut harness, "Remove blending codes");
+    assert_eq!(harness.state().settings.g_pre, "G17 M3 S3000");
+    assert_eq!(harness.state().status().level, StatusLevel::Info);
+}
+
+#[test]
+fn rejected_codes_with_no_safe_removal_are_only_reported() {
+    let (mut harness, _) = harness();
+    harness.state_mut().settings.g_post = "G81 X1 Z-1|M2".into();
+    click(&mut harness, "Output");
+    harness.run_steps(2);
+    assert!(harness.state().status().text.contains("G81"));
+    // Once in the status bar, and once beside the field.
+    assert_eq!(harness.get_all_by_label_contains("uses G81").count(), 2);
+    assert!(harness.query_by_label("Remove blending codes").is_none());
+}
+
+#[test]
+fn reset_buttons_restore_each_field_alone() {
+    let defaults = Settings::default();
+    let (mut harness, _) = harness_with(|s| {
+        s.g_pre = "G17 M3 S9000".into();
+        s.g_post = "M5|M30".into();
+    });
+    click(&mut harness, "Output");
+
+    click(&mut harness, "Reset header");
+    assert_eq!(harness.state().settings.g_pre, defaults.g_pre);
+    assert_eq!(harness.state().settings.g_post, "M5|M30");
+
+    click(&mut harness, "Reset footer");
+    assert_eq!(harness.state().settings.g_post, defaults.g_post);
+}
+
+#[test]
+fn reset_buttons_are_disabled_at_the_default() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "Output");
+    assert!(
+        harness
+            .get_by_label("Reset header")
+            .accesskit_node()
+            .is_disabled()
+    );
+    harness.state_mut().settings.g_pre = "G17".into();
+    harness.run_steps(2);
+    assert!(
+        !harness
+            .get_by_label("Reset header")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        harness
+            .get_by_label("Reset footer")
+            .accesskit_node()
+            .is_disabled()
+    );
+}
+
+#[test]
+fn reset_header_clears_the_controller_warning() {
+    let (mut harness, _) = harness_with(|s| s.g_pre = "G17 G64 P0.001 M3 S3000".into());
+    assert_eq!(harness.state().status().level, StatusLevel::Warning);
+    click(&mut harness, "Output");
+    click(&mut harness, "Reset header");
+    assert_eq!(harness.state().status().level, StatusLevel::Info);
+}
+
+// ---- Simulator --------------------------------------------------------------------------------
+
+fn simulator_harness(settings: impl FnOnce(&mut Settings)) -> Harness<'static, RengraveApp> {
+    let (mut harness, _) = harness_with(settings);
+    click(&mut harness, "Simulate");
+    harness.run_steps(2);
+    harness
+}
+
+/// Steps until the stock has been cut up to the playback position.
+fn catch_up(harness: &mut Harness<'_, RengraveApp>) {
+    let start = Instant::now();
+    harness.step();
+    while !harness.state().simulator.has_caught_up() {
+        harness.step();
+        assert!(start.elapsed() < Duration::from_secs(60));
+    }
+}
+
+#[test]
+fn simulator_starts_paused_on_untouched_stock() {
+    let harness = simulator_harness(|_| {});
+    let view = &harness.state().simulator;
+    let sim = view.simulation().expect("the program interprets");
+    assert!(sim.total_seconds() > 0.0);
+    assert!(!view.is_playing());
+    assert_eq!(view.position(), 0.0);
+    let (nx, ny) = sim.grid_size();
+    assert_eq!(sim.height(nx / 2, ny / 2), 0.0);
+    assert!(harness.query_by_label("Simulation view").is_some());
+}
+
+#[test]
+fn play_advances_and_pause_stops() {
+    let mut harness = simulator_harness(|_| {});
+    click(&mut harness, "Play");
+    assert!(harness.state().simulator.is_playing());
+    harness.run_steps(3);
+    let playing_at = harness.state().simulator.position();
+    assert!(playing_at > 0.0);
+
+    click(&mut harness, "Pause");
+    assert!(!harness.state().simulator.is_playing());
+    let paused_at = harness.state().simulator.position();
+    harness.run_steps(3);
+    assert_eq!(harness.state().simulator.position(), paused_at);
+}
+
+#[test]
+fn finish_shows_the_carved_result_and_restart_restores_stock() {
+    let mut harness = simulator_harness(|_| {});
+    click(&mut harness, "Finish");
+    catch_up(&mut harness);
+    let carved_depth = {
+        let sim = harness.state().simulator.simulation().unwrap();
+        assert_eq!(sim.time(), sim.total_seconds());
+        let (nx, ny) = sim.grid_size();
+        (0..ny)
+            .flat_map(|j| (0..nx).map(move |i| (i, j)))
+            .map(|(i, j)| sim.height(i, j))
+            .fold(0.0_f32, f32::min)
+    };
+    assert!(carved_depth < -0.05, "{carved_depth}");
+
+    click(&mut harness, "Restart");
+    catch_up(&mut harness);
+    let sim = harness.state().simulator.simulation().unwrap();
+    let (nx, ny) = sim.grid_size();
+    assert_eq!(sim.time(), 0.0);
+    assert!((0..ny).all(|j| (0..nx).all(|i| sim.height(i, j) == 0.0)));
+}
+
+#[test]
+fn play_after_the_end_starts_over() {
+    let mut harness = simulator_harness(|_| {});
+    click(&mut harness, "Finish");
+    catch_up(&mut harness);
+    click(&mut harness, "Play");
+    assert!(harness.state().simulator.is_playing());
+    let total = harness
+        .state()
+        .simulator
+        .simulation()
+        .unwrap()
+        .total_seconds();
+    assert!(harness.state().simulator.position() < total);
+}
+
+#[test]
+fn scrub_bar_moves_playback_both_ways() {
+    let mut harness = simulator_harness(|_| {});
+    let total = harness
+        .state()
+        .simulator
+        .simulation()
+        .unwrap()
+        .total_seconds();
+    let bar = harness.get_by_role(egui::accesskit::Role::Slider);
+    bar.set_value_accesskit(total * 0.5);
+    harness.run_steps(1);
+    catch_up(&mut harness);
+    let middle = harness.state().simulator.simulation().unwrap().time();
+    assert!((middle - total * 0.5).abs() < total * 0.01, "{middle}");
+
+    let bar = harness.get_by_role(egui::accesskit::Role::Slider);
+    bar.set_value_accesskit(total * 0.25);
+    harness.run_steps(1);
+    catch_up(&mut harness);
+    let earlier = harness.state().simulator.simulation().unwrap().time();
+    assert!((earlier - total * 0.25).abs() < total * 0.01, "{earlier}");
+}
+
+#[test]
+fn speed_choice_applies() {
+    let mut harness = simulator_harness(|_| {});
+    click(&mut harness, "1000×");
+    assert_eq!(harness.state().simulator.speed(), 1000.0);
+}
+
+#[test]
+fn changed_program_restarts_the_simulation() {
+    let mut harness = simulator_harness(|_| {});
+    click(&mut harness, "Finish");
+    catch_up(&mut harness);
+    let before = harness
+        .state()
+        .simulator
+        .simulation()
+        .unwrap()
+        .total_seconds();
+
+    // A slower feed changes only the program, not the toolpath.
+    harness.state_mut().settings.feed = 1.0;
+    harness.run_steps(3);
+    let view = &harness.state().simulator;
+    assert_eq!(view.position(), 0.0);
+    assert!(view.simulation().unwrap().total_seconds() > before * 2.0);
+}
+
+#[test]
+fn simulator_waits_while_live_carve_is_off() {
+    let mut harness = simulator_harness(|_| {});
+    click(&mut harness, "Live V-carve");
+    harness.state_mut().settings.y_scale = 0.5;
+    harness.run_steps(1);
+    settle(&mut harness);
+    assert!(
+        harness
+            .query_by_label("V-carve paths are not calculated.")
+            .is_some()
+    );
+}
+
+#[test]
+fn uninterpretable_program_shows_why() {
+    let mut harness = simulator_harness(|_| {});
+    harness.state_mut().settings.g_post = "G1 X$".into();
+    harness.run_steps(3);
+    let view = &harness.state().simulator;
+    assert!(view.simulation().is_none());
+    let error = view
+        .error()
+        .expect("the footer cannot be parsed")
+        .to_string();
+    assert!(harness.query_by_label(&error).is_some(), "{error}");
+}
+
+#[test]
+fn engraving_can_be_simulated() {
+    let mut harness = simulator_harness(|s| s.cut_type = CutType::Engrave);
+    click(&mut harness, "Finish");
+    catch_up(&mut harness);
+    let sim = harness.state().simulator.simulation().unwrap();
+    let design = harness.state().design().unwrap();
+    let s = design.segments[0];
+    let at = sim
+        .height_at((s.x1 + s.x2) / 2.0, (s.y1 + s.y2) / 2.0)
+        .unwrap();
+    assert!(
+        (f64::from(at) - harness.state().settings.z_cut).abs() < 1e-3,
+        "{at}"
+    );
+}
+
+#[test]
+fn simulator_shares_pan_and_zoom_with_the_preview() {
+    let (mut harness, _) = harness();
+    harness.state_mut().preview.zoom_by(2.0);
+    harness.run_steps(2);
+    let view = harness.state().preview.transform.unwrap();
+    click(&mut harness, "Simulate");
+    harness.run_steps(2);
+    assert_eq!(harness.state().preview.transform.unwrap().scale, view.scale);
+    click(&mut harness, "Path");
+    harness.run_steps(2);
 }
 
 // ---- Preview ----------------------------------------------------------------------------------

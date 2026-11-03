@@ -1,0 +1,18 @@
+[package]
+name = "warp-gcode"
+description = "G-code parser and interpreter (RS274/NGC dialect used by Mach3/Mach4/LinuxCNC/UCCNC)"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+glam = { version = "0.34", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[lints.clippy]
+all = "allow"

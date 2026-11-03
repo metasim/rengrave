@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! Renders the documentation screenshots. Needs a GPU, so it only runs with the `screenshots`
 //! feature: `cargo test -p rengrave_gui --features screenshots --test screenshots`.
 //!
@@ -62,6 +65,25 @@ fn shoot(dark: bool, suffix: &str, all_tabs: bool) {
     harness.state_mut().active_view = ActiveView::Gcode;
     harness.run_steps(3);
     save(&mut harness, &format!("output{suffix}.png"));
+
+    harness.state_mut().tab = Tab::Toolpath;
+    harness.state_mut().active_view = ActiveView::Simulator;
+    harness.run_steps(3);
+    let total = harness
+        .state()
+        .simulator
+        .simulation()
+        .expect("the program interprets")
+        .total_seconds();
+    harness.state_mut().simulator.seek(total * 0.6);
+    let start = Instant::now();
+    harness.step();
+    while !harness.state().simulator.has_caught_up() {
+        harness.step();
+        assert!(start.elapsed() < Duration::from_secs(120));
+    }
+    harness.run_steps(2);
+    save(&mut harness, &format!("simulator{suffix}.png"));
 }
 
 #[test]

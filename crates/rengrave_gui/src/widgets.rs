@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! Small reusable pieces of the settings panel.
 
 use egui::{Color32, DragValue, Response, RichText, Sense, Stroke, Ui, pos2, vec2};
@@ -104,9 +107,39 @@ pub trait UiExt {
 
     /// Lays out a two-column form with a consistent label width.
     fn form_grid(&mut self, id: &str, add: impl FnOnce(&mut Ui));
+
+    /// A labeled single-line text field, with a small button that restores `default`.
+    fn resettable_text(&mut self, name: &str, tip: &str, value: &mut String, default: &str);
 }
 
 impl UiExt for Ui {
+    fn resettable_text(&mut self, name: &str, tip: &str, value: &mut String, default: &str) {
+        let label = self
+            .horizontal(|ui| {
+                let label = ui.label(name).on_hover_text(tip);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let differs = value != default;
+                    let reset = ui
+                        .add_enabled(differs, egui::Button::new("Reset").small())
+                        .on_hover_text(format!("Restore the default: {default}"));
+                    reset.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::Role::Button,
+                            differs,
+                            format!("Reset {}", name.to_lowercase()),
+                        )
+                    });
+                    if reset.clicked() {
+                        default.clone_into(value);
+                    }
+                });
+                label
+            })
+            .inner;
+        self.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY))
+            .labelled_by(label.id);
+    }
+
     fn segmented<T: Copy + PartialEq>(
         &mut self,
         value: &mut T,

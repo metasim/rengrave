@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from labels and tooltip text of F-Engrave 1.78. The layout is new.
+
 //! The settings panel: all job settings, grouped by the step of the workflow they belong to.
 
 use crate::app::{RengraveApp, StatusLevel, Tab};
@@ -5,7 +11,7 @@ use crate::widgets::{Form, Number, UiExt};
 use egui::{CollapsingHeader, Grid, RichText, Ui};
 use rengrave_core::{
     ArcFit, BitShape, BuiltinFont, CheckScope, CleanupBit, CutType, HeightCalc, InputType, Justify,
-    Origin, Tracer, TurnPolicy,
+    Origin, Settings, Tracer, TurnPolicy,
 };
 
 const PERCENT: &str = " %";
@@ -946,17 +952,34 @@ impl RengraveApp {
                         &mut s.no_comments,
                     );
                 });
-                let label = ui
-                    .label("Header")
-                    .on_hover_text("Written before the first move. | starts a new line.");
-                ui.add(egui::TextEdit::singleline(&mut s.g_pre).desired_width(f32::INFINITY))
-                    .labelled_by(label.id);
-                let label = ui
-                    .label("Footer")
-                    .on_hover_text("Written after the last move. | starts a new line.");
-                ui.add(egui::TextEdit::singleline(&mut s.g_post).desired_width(f32::INFINITY))
-                    .labelled_by(label.id);
+                let defaults = Settings::default();
+                ui.resettable_text(
+                    "Header",
+                    "Written before the first move. | starts a new line.",
+                    &mut s.g_pre,
+                    &defaults.g_pre,
+                );
+                ui.resettable_text(
+                    "Footer",
+                    "Written after the last move. | starts a new line.",
+                    &mut s.g_post,
+                    &defaults.g_post,
+                );
             });
+        let controller_issues = self.settings.controller_issues();
+        if !controller_issues.is_empty() {
+            for issue in &controller_issues {
+                ui.colored_label(ui.visuals().warn_fg_color, issue);
+            }
+            if self.settings.has_removable_codes()
+                && ui
+                    .button("Remove blending codes")
+                    .on_hover_text("Remove G64 and G61.1, keeping the rest of the line")
+                    .clicked()
+            {
+                self.settings.remove_unsupported_codes();
+            }
+        }
         CollapsingHeader::new("Export")
             .default_open(true)
             .show(ui, |ui| {

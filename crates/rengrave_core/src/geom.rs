@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from `Transform`, `Get_Angle`, and `point_inside_polygon` of F-Engrave 1.78.
+
 //! Planar geometry primitives shared by the toolpath algorithms.
 
 /// Distance below which two coordinates are considered coincident.

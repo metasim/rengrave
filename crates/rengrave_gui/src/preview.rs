@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! The interactive design preview: a pannable, zoomable view of outlines and toolpaths.
 
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
@@ -149,6 +152,26 @@ struct CacheKey {
     circle: bool,
 }
 
+/// A canvas prepared for drawing by [`Preview::begin_canvas`].
+pub(crate) struct Canvas {
+    pub(crate) response: Response,
+    pub(crate) painter: egui::Painter,
+    pub(crate) transform: ViewTransform,
+    rect: Rect,
+    palette: Palette,
+}
+
+impl Canvas {
+    /// Draws arrows along the X and Y axes at the origin.
+    pub(crate) fn draw_axes(&self) {
+        const LEN: f32 = 36.0;
+        let o = self.transform.to_screen(0.0, 0.0);
+        let (painter, palette) = (&self.painter, &self.palette);
+        painter.arrow(o, vec2(LEN, 0.0), Stroke::new(2.0, palette.x_axis));
+        painter.arrow(o, vec2(0.0, -LEN), Stroke::new(2.0, palette.y_axis));
+    }
+}
+
 /// Interactive state of the canvas.
 #[derive(Default)]
 pub struct Preview {
@@ -184,40 +207,37 @@ impl Preview {
         };
     }
 
-    /// Draws the canvas and handles pointer input.
-    pub fn show(
+    /// Allocates a canvas filling the available space, handles pointer input, and draws the
+    /// background and grid. `bounds` is what the view fits to, and `label` its accessible name.
+    pub(crate) fn begin_canvas(
         &mut self,
         ui: &mut Ui,
-        scene: &Scene,
-        settings: &Settings,
-        revision: u64,
-    ) -> Response {
+        bounds: Option<Bounds>,
+        label: &'static str,
+    ) -> Canvas {
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
-        response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Canvas, true, "Design preview"));
-        let canvas = response.rect;
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Canvas, true, label));
+        let rect = response.rect;
         let palette = Palette::for_mode(ui.visuals().dark_mode);
-        painter.rect_filled(canvas, 0.0, palette.background);
+        painter.rect_filled(rect, 0.0, palette.background);
 
-        let bounds = scene.design.as_ref().map(|d| d.bounds);
         let fitted = bounds.map_or_else(
             || ViewTransform {
                 scale: 50.0,
                 center: (0.0, 0.0),
-                origin: canvas.center(),
+                origin: rect.center(),
             },
-            |b| ViewTransform::fit(&b, canvas),
+            |b| ViewTransform::fit(&b, rect),
         );
         let mut transform = match self.custom_view {
             Some((scale, center)) => ViewTransform {
                 scale,
                 center,
-                origin: canvas.center(),
+                origin: rect.center(),
             },
             None => fitted,
         };
 
-        // Pointer input.
         if response.dragged() {
             let delta = response.drag_delta();
             transform.center.0 -= f64::from(delta.x / transform.scale);
@@ -251,10 +271,34 @@ impl Preview {
         }
         self.transform = Some(transform);
 
-        let painter = painter.with_clip_rect(canvas);
+        let painter = painter.with_clip_rect(rect);
         if self.layers.grid {
-            Self::draw_grid(&painter, &transform, canvas, &palette);
+            Self::draw_grid(&painter, &transform, rect, &palette);
         }
+        Canvas {
+            response,
+            painter,
+            transform,
+            rect,
+            palette,
+        }
+    }
+
+    /// Draws the design preview and handles pointer input.
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        scene: &Scene,
+        settings: &Settings,
+        revision: u64,
+    ) -> Response {
+        let canvas = self.begin_canvas(
+            ui,
+            scene.design.as_ref().map(|d| d.bounds),
+            "Design preview",
+        );
+        let (transform, palette) = (canvas.transform, &canvas.palette);
+        let rect = canvas.rect;
         let key = CacheKey {
             transform,
             revision,
@@ -281,19 +325,19 @@ impl Preview {
                     scene,
                     settings,
                     &transform,
-                    &palette,
+                    palette,
                     &self.layers,
-                    canvas,
+                    rect,
                 ));
                 self.cache = Some((key, shapes.clone()));
                 shapes
             }
         };
-        painter.extend(shapes.iter().cloned());
+        canvas.painter.extend(shapes.iter().cloned());
         if settings.show_axis {
-            Self::draw_axes(&painter, &transform, &palette);
+            canvas.draw_axes();
         }
-        response
+        canvas.response
     }
 
     /// Picks a grid spacing of 1, 2, or 5 times a power of ten, at least `min_px` wide.
@@ -360,13 +404,6 @@ impl Preview {
             );
             yi += 1;
         }
-    }
-
-    fn draw_axes(painter: &egui::Painter, t: &ViewTransform, palette: &Palette) {
-        const LEN: f32 = 36.0;
-        let o = t.to_screen(0.0, 0.0);
-        painter.arrow(o, vec2(LEN, 0.0), Stroke::new(2.0, palette.x_axis));
-        painter.arrow(o, vec2(0.0, -LEN), Stroke::new(2.0, palette.y_axis));
     }
 
     fn build_shapes(
@@ -492,7 +529,12 @@ impl Preview {
     }
 
     /// Draws the path of a tool.
-    fn path_lines(points: &[CarvePoint], t: &ViewTransform, stroke: Stroke, out: &mut Vec<Shape>) {
+    pub(crate) fn path_lines(
+        points: &[CarvePoint],
+        t: &ViewTransform,
+        stroke: Stroke,
+        out: &mut Vec<Shape>,
+    ) {
         out.extend(
             Self::polylines(points, t)
                 .into_iter()

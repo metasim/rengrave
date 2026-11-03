@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! The error type returned by engine operations.
 
 use std::path::PathBuf;
@@ -25,6 +28,9 @@ pub enum Error {
     /// There is nothing to cut with the current input.
     #[error("{0}")]
     NothingToCut(String),
+    /// A program could not be simulated.
+    #[error("simulation error: {0}")]
+    Simulation(String),
     /// The operation was canceled through its [`crate::Progress`] handle.
     #[error("calculation canceled")]
     Canceled,
