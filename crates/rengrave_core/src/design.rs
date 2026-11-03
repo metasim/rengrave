@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from `DoIt` and `Rotn` of F-Engrave 1.78, which credits engrave-11.py by Lawrence Glaister.
+
 //! Lays out text or a drawing as positioned outline segments.
 
 use crate::error::{Error, Result};

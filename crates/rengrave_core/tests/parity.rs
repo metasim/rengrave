@@ -1,12 +1,30 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! Compares output with reference G-code produced by the original F-Engrave 1.78.
 //!
 //! The fixtures in `tests/parity` are written by `tools/parity/generate.py`, which runs the
 //! original program's batch mode. Every program must match line for line. Trailing whitespace
-//! is ignored because the original appends a space to header lines read from settings files.
+//! is ignored because the original appends a space to header lines read from settings files, and
+//! one deliberate difference, for FluidNC, is undone before comparing.
 
 use rengrave_core::font::Font;
 use rengrave_core::{InputType, Job, Progress, Settings};
 use std::path::{Path, PathBuf};
+
+const ORIGINAL_HEADER: &str = "G17 G64 P0.001 M3 S3000";
+
+/// Undoes the one deliberate difference from the original's G-code: a full circle now names its
+/// end point, as FluidNC and GRBL require.
+fn without_circle_end_point(line: &str) -> String {
+    match line.strip_prefix("G2 X") {
+        Some(rest) if rest.contains(" I") => {
+            let offsets = &rest[rest.find(" I").unwrap_or(0)..];
+            format!("G2{offsets}")
+        }
+        _ => line.to_string(),
+    }
+}
 
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/parity")
@@ -18,7 +36,11 @@ fn check_case(name: &str) {
     let expected = std::fs::read_to_string(dir.join(format!("{name}.ngc"))).unwrap();
     let text = std::fs::read_to_string(dir.join(format!("{name}.text"))).unwrap();
 
-    let mut settings = Settings::default();
+    // The reference programs use the original's default header, which suits LinuxCNC.
+    let mut settings = Settings {
+        g_pre: ORIGINAL_HEADER.into(),
+        ..Settings::default()
+    };
     let problems = settings.apply_settings_text(&cfg);
     assert!(problems.is_empty(), "{name}: {problems:?}");
     settings.text = text;
@@ -33,7 +55,12 @@ fn check_case(name: &str) {
 
     let expected: Vec<&str> = expected.lines().map(str::trim_end).collect();
     for (i, (a, e)) in actual.iter().zip(&expected).enumerate() {
-        assert_eq!(a, e, "{name}: first difference at line {}", i + 1);
+        let a = if name == "engrave_circle" {
+            without_circle_end_point(a)
+        } else {
+            a.clone()
+        };
+        assert_eq!(&a, e, "{name}: first difference at line {}", i + 1);
     }
     assert_eq!(actual.len(), expected.len(), "{name}: program length");
 }

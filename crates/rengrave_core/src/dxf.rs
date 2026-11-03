@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from `parse_dxf`, `DXF_CLASS`, `NURBSClass`, and `BSplineClass` of F-Engrave 1.78, which credits
+// dxf.py (dxf-reader) and DXF2GCODE.
+
 //! Reads DXF drawings into straight strokes.
 //!
 //! Supported entities are `LINE`, `ARC`, `CIRCLE`, `LWPOLYLINE` and `POLYLINE` (with bulges),

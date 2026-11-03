@@ -1,0 +1,2 @@
+# Vendored sources stay byte-identical to upstream.
+disable_all_formatting = true

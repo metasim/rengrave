@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
 """Regenerates the parity fixtures by running F-Engrave's batch mode.
 
 usage: generate.py <path to f-engrave.py>

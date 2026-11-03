@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from `Clean_Path_Calc` and `DetectIntersect` of F-Engrave 1.78.
+
 //! Secondary cleanup operations that clear material a V-carve cannot reach.
 //!
 //! The area to clear is derived by offsetting the design's outlines. A straight bit then clears

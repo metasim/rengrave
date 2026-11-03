@@ -1,0 +1,17 @@
+[package]
+name = "warp-sim"
+description = "Material-removal simulation (height-field stock) for WarpNine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+warp-tools = { path = "../warp-tools" }
+glam = { version = "0.34", features = ["serde"] }
+
+[lints.clippy]
+all = "allow"

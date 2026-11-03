@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! File selection, behind a trait so tests can run without native dialogs.
 
 use std::path::{Path, PathBuf};

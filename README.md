@@ -20,6 +20,7 @@ reference programs. It runs with no helper programs and needs no font files.
   built-in tracer or `potrace`
 - **Cleanup operations** that clear flat regions with a straight bit and tidy edges with a V-bit
 - **Output** as G-code with optional arc fitting (`I`/`J` or `R`), plus SVG and DXF outlines
+- **Simulation** of the G-code program, showing the tool moving and the carved result
 - **Settings files** compatible with F-Engrave's `fengrave_set` format, including settings
   embedded in its G-code
 
@@ -55,6 +56,11 @@ Choose the text and font on the **Design** tab and the bit on the **Toolpath** t
 | Save G-code | `Ctrl`+`S` |
 | Copy G-code | `Ctrl`+`G` |
 | Open image | `Ctrl`+`O`, or drop a file on the window |
+
+The **Simulate** tab plays the G-code program and cuts into a model of the stock. Scrub in either
+direction, or press **Finish** to see the result. Run times are estimates that ignore acceleration.
+
+![The Simulate tab, part way through carving](docs/images/simulator.png)
 
 A file path on the command line (`rengrave-gui job.ngc`) opens that settings file, font, or image.
 
@@ -104,9 +110,13 @@ option. Any setting without its own option can be set by its settings-file name,
 `--set v_stp_crner=210`.
 
 > **Check before cutting.** Lengths default to inches. Preview a new program in a G-code viewer
-> and confirm the units, origin, and depths suit your machine. The default header
-> (`G17 G64 P0.001 M3 S3000`) starts the spindle and targets LinuxCNC. Other controllers, such as
-> GRBL, may need a different header (`--set "gpre=G17 M3 S10000"`).
+> and confirm the units, origin, and depths suit your machine.
+>
+> **Controllers:** the defaults target [FluidNC](http://wiki.fluidnc.com): the header is
+> `G17 M3 S3000`, which starts the spindle, and the footer is `M5|M2`. FluidNC rejects a whole line
+> if it contains a code it does not support, so rengrave warns about any such code in a custom
+> header or footer. On LinuxCNC, the original program's header gives path blending:
+> `--set "gpre=G17 G64 P0.001 M3 S3000"`.
 
 ## Project layout
 
@@ -118,6 +128,8 @@ option. Any setting without its own option can be set by its settings-file name,
 | [`docs/PORTING.md`](docs/PORTING.md) | How the code maps to the original, and how it was verified |
 | [`docs/UX_REVIEW.md`](docs/UX_REVIEW.md) | The design review behind the application's interface |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Decisions made during the port, for review |
+| [`COPYRIGHT.md`](COPYRIGHT.md) | Copyright and license of each file |
+| [`vendor`](vendor) | Third-party crates kept in the repository, for the simulator |
 | [`tools/parity`](tools/parity) | Regenerates reference programs from the original |
 
 ## Using the engine
@@ -155,6 +167,6 @@ cargo test -p rengrave_gui --features screenshots --test screenshots
 ## License
 
 Licensed under the [GNU General Public License, version 3 or later](LICENSE), as is F-Engrave, of
-which this is a derivative work. F-Engrave is copyright Scorch. The built-in typefaces come from
-the [`epaint_default_fonts`](https://crates.io/crates/epaint_default_fonts) crate: Ubuntu Light is
-under the Ubuntu Font License, and Hack under its own permissive license.
+which this is a derivative work. F-Engrave is copyright Scorch. Files state their own terms, and
+[`COPYRIGHT.md`](COPYRIGHT.md) lists which are ports, which are new, and which third-party code keeps
+its own license, such as the MIT-licensed crates in [`vendor`](vendor).

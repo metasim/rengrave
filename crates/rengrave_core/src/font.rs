@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from `parse` of F-Engrave 1.78 (CXF fonts), which credits cxf2cnc.py by Ben Lipkowitz. The
+// TrueType code is independent of the GPL-2.0-only ttf2cxf_stream helper; see COPYRIGHT.md.
+
 //! Stroke fonts: the CXF file format, TrueType/OpenType outlines, and embedded typefaces.
 //!
 //! Every input the engine accepts, including traced images and DXF drawings, is reduced to a
@@ -281,35 +288,36 @@ impl OutlineSink {
         }
     }
 
-    /// Walks `eval` over `0..=1`, halving the step while the arc through a chord's midpoint
-    /// spans more than the tolerance, and doubling it again afterwards.
+    /// Appends strokes approximating a curve parameterized over `0..=1`.
+    ///
+    /// Each span is split in half until the two halves' chords turn by no more than half of the
+    /// tolerance, which on a circular arc corresponds to the span's angle meeting the tolerance.
+    /// The curve is first divided into a few spans, so that an inflection at a midpoint cannot
+    /// make a curved span look straight.
     fn flatten(&mut self, eval: impl Fn(f64) -> (f64, f64)) {
-        const COINCIDENT_SQUARED: f64 = 0.000001;
-        const MIN_STEP: f64 = 1.0 / 4096.0;
-        let mut t1 = 0.0_f64;
-        let mut step = 0.25_f64;
-        let mut p1 = eval(0.0);
-        while t1 < 1.0 {
-            let t2 = (t1 + step).min(1.0);
-            let p2 = eval(t2);
-            let test = eval((t1 + t2) / 2.0);
-            let chord = (p2.0 - p1.0).hypot(p2.1 - p1.1);
-            let sagitta = (test.0 - (p1.0 + p2.0) / 2.0).hypot(test.1 - (p1.1 + p2.1) / 2.0);
-            let l1 = (test.0 - p1.0).powi(2) + (test.1 - p1.1).powi(2);
-            let l2 = (p2.0 - test.0).powi(2) + (p2.1 - test.1).powi(2);
-            let angle = if l1 < COINCIDENT_SQUARED || l2 < COINCIDENT_SQUARED || sagitta <= 0.0 {
-                0.0
+        const INITIAL_SPANS: u32 = 4;
+        const MAX_DEPTH: u32 = 12;
+        let turn_limit = self.tol / 2.0;
+        let mut pending: Vec<(f64, f64, u32)> = (0..INITIAL_SPANS)
+            .rev()
+            .map(|k| {
+                let n = f64::from(INITIAL_SPANS);
+                (f64::from(k) / n, f64::from(k + 1) / n, 0)
+            })
+            .collect();
+        while let Some((lo, hi, depth)) = pending.pop() {
+            let (a, c) = (eval(lo), eval(hi));
+            let mid = (lo + hi) / 2.0;
+            let b = eval(mid);
+            let (ab, bc) = ((b.0 - a.0, b.1 - a.1), (c.0 - b.0, c.1 - b.1));
+            let turn = (ab.0 * bc.1 - ab.1 * bc.0)
+                .atan2(ab.0 * bc.0 + ab.1 * bc.1)
+                .abs();
+            if turn > turn_limit && depth < MAX_DEPTH {
+                pending.push((mid, hi, depth + 1));
+                pending.push((lo, mid, depth + 1));
             } else {
-                let radius = (chord * chord / 4.0 + sagitta * sagitta) / (2.0 * sagitta);
-                2.0 * ((chord / 2.0) / radius).clamp(-1.0, 1.0).asin()
-            };
-            if angle > self.tol && step > MIN_STEP {
-                step /= 2.0;
-            } else {
-                self.strokes.push(Stroke::new(p1.0, p1.1, p2.0, p2.1));
-                step *= 2.0;
-                t1 = t2;
-                p1 = p2;
+                self.strokes.push(Stroke::new(a.0, a.1, c.0, c.1));
             }
         }
     }
@@ -577,6 +585,32 @@ mod tests {
         Font::normalize_winding(&mut square);
         assert!(signed_area(&square) < 0.0);
         assert_eq!(square[0], Stroke::new(0.0, 0.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn flattening_stays_within_the_angle_tolerance_on_a_circle() {
+        let mut sink = OutlineSink::new(10f64.to_radians());
+        sink.flatten(|t| {
+            let a = t * std::f64::consts::TAU;
+            (5.0 * a.cos(), 5.0 * a.sin())
+        });
+        assert!(sink.strokes.len() >= 36, "{}", sink.strokes.len());
+        for w in sink.strokes.windows(2) {
+            assert_eq!((w[0].x2, w[0].y2), (w[1].x1, w[1].y1), "strokes connect");
+            let a = (w[0].y2 - w[0].y1).atan2(w[0].x2 - w[0].x1);
+            let b = (w[1].y2 - w[1].y1).atan2(w[1].x2 - w[1].x1);
+            let turn = (b - a).sin().atan2((b - a).cos()).abs();
+            assert!(turn <= 10.5f64.to_radians(), "{}", turn.to_degrees());
+        }
+        let (f, l) = (sink.strokes[0], sink.strokes[sink.strokes.len() - 1]);
+        assert!((f.x1 - l.x2).abs() < 1e-9 && (f.y1 - l.y2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn flattening_a_straight_curve_stays_minimal() {
+        let mut sink = OutlineSink::new(5f64.to_radians());
+        sink.flatten(|t| (t, 2.0 * t));
+        assert_eq!(sink.strokes.len(), 4);
     }
 
     #[test]

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! End-to-end tests of the `rengrave` binary.
 
 use std::path::{Path, PathBuf};
@@ -66,6 +69,8 @@ fn cxf_font_and_settings_file_match_the_original_program() {
         &fixture("tiny.cxf"),
         "-t",
         "AB",
+        "--set",
+        "gpre=G17 G64 P0.001 M3 S3000",
     ]);
     let trimmed: Vec<&str> = expected.lines().map(str::trim_end).collect();
     assert_eq!(actual.lines().collect::<Vec<_>>(), trimmed);
@@ -144,6 +149,22 @@ fn non_finite_values_are_rejected() {
         assert!(!out.status.success(), "{args:?}");
         assert!(String::from_utf8_lossy(&out.stderr).starts_with("error:"));
     }
+}
+
+#[test]
+fn header_unsupported_by_fluidnc_warns_on_stderr() {
+    let out = rengrave(&["gcode", "-t", "A", "--set", "gpre=G17 G64 P0.001 M3 S3000"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("G64"));
+
+    // The defaults need no warning.
+    let out = rengrave(&["gcode", "-t", "A"]);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("G64"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(
+        "
+G17 M3 S3000
+"
+    ));
 }
 
 #[test]

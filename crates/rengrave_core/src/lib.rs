@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! Toolpath engine for engraving and V-carving text and images.
 //!
 //! `rengrave_core` is a Rust port of the calculations in
@@ -42,6 +45,7 @@ pub mod geom;
 mod job;
 mod progress;
 pub mod settings;
+pub mod simulate;
 pub mod sort;
 pub mod trace;
 pub mod vcarve;
@@ -57,4 +61,5 @@ pub use settings::{
     ArcFit, BitShape, CheckScope, CleanupBit, CleanupOps, CutType, HeightCalc, InputType, Issue,
     Justify, Origin, Settings, Tracer, TurnPolicy, Units,
 };
+pub use simulate::Simulation;
 pub use vcarve::{CarvePath, CarvePoint};

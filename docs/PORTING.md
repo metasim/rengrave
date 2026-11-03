@@ -8,7 +8,7 @@ the port was verified.
 | Original | Port | Notes |
 | --- | --- | --- |
 | `parse` | `font::Font::parse_cxf` | |
-| `ttf2cxf_stream` (C++ helper) | `font::Font::from_outline_font` | In-process, with `ttf-parser` |
+| `ttf2cxf_stream` (C++ helper) | `font::Font::from_outline_font` | Replaced, not ported: it is GPL-2.0-only. See [COPYRIGHT.md](../COPYRIGHT.md) |
 | `parse_dxf`, `DXF_CLASS` | `dxf::DxfDrawing::parse` | |
 | `NURBSClass`, `BSplineClass` | `dxf::Nurbs` | Evaluates positions only; derivatives were never used |
 | `potrace` (external program) | `trace::Bitmap` | Native tracer, with `Tracer::Potrace` as an option |
@@ -43,8 +43,11 @@ the original program. The 35 reference programs exercise:
 - DXF input: engraving, percent sizing, V-carving with loop sorting, including open chains,
   rotation, and boxes
 
-Every line matches. Trailing whitespace is ignored, because the original appends a space to header
-lines read from a settings file.
+Every line matches, given two allowances. Trailing whitespace is ignored, because the original
+appends a space to header lines read from a settings file. And the engraved circle now names its end
+point, as FluidNC requires, which the test undoes before comparing. The tests also set the original's
+header, since rengrave's default header targets FluidNC instead. See D13 in
+[DECISIONS.md](DECISIONS.md).
 
 To regenerate the references, run the program from the source archive with the stubbed GUI modules
 in `tools/parity`:

@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from `WriteGCode`, `WRITE_CLEAN_UP`, `Gcode`, and `douglas` of F-Engrave 1.78, which credits
+// engrave-11.py by Lawrence Glaister, and Author.py and image2gcode from LinuxCNC (emc2).
+
 //! G-code output: path simplification, arc fitting, multi-pass depth logic, and file assembly.
 
 use crate::design::Design;
@@ -415,7 +422,15 @@ impl GcodeProgram {
             } else {
                 format!("G1 Z{depth_val} F{plunge_str}")
             });
-            let arc = format!("G2 I{:.dp$} J{:.dp$}", design.circle_radius, 0.0);
+            // The end point is required by FluidNC and GRBL, which reject an arc without one. Being
+            // the same as the start, it makes a full circle.
+            let arc = format!(
+                "G2 X{:.dp$} Y{:.dp$} I{:.dp$} J{:.dp$}",
+                design.circle_center.x - design.circle_radius,
+                design.circle_center.y,
+                design.circle_radius,
+                0.0
+            );
             out.push(if same_feed {
                 arc
             } else {
@@ -1124,7 +1139,7 @@ mod tests {
         let p = GcodeProgram::generate(&d, None, &s).unwrap();
         assert_eq!(p[0], "G90");
         assert_eq!(p[1], "G20");
-        assert_eq!(p[2], "G17 G64 P0.001 M3 S3000");
+        assert_eq!(p[2], "G17 M3 S3000");
         assert_eq!(p[3], "F5.00");
         assert_eq!(p[4], "G0 Z0.2500");
         assert_eq!(p[6], "G1 Z-0.0050");
@@ -1215,8 +1230,50 @@ mod tests {
         };
         let d = Design::layout(&drawing(), &s).unwrap();
         let p = GcodeProgram::generate(&d, None, &s).unwrap();
-        let g2 = p.iter().find(|l| l.starts_with("G2 I")).expect("circle");
+        let g2 = p.iter().find(|l| l.starts_with("G2 X")).expect("circle");
         assert!(g2.ends_with("J0.0000"), "{g2}");
+    }
+
+    #[test]
+    fn every_arc_names_an_end_point_as_fluidnc_requires() {
+        let arcs_of = |s: &Settings, font: &Font| {
+            let d = Design::layout(font, s).unwrap();
+            let p = GcodeProgram::generate(&d, None, s).unwrap();
+            p.into_iter()
+                .filter(|l| l.starts_with("G2 ") || l.starts_with("G3 "))
+                .collect::<Vec<_>>()
+        };
+        let circle: Vec<Stroke> = (0..72)
+            .map(|i| {
+                let angle = |k: i32| f64::from(k) * 5f64.to_radians();
+                let (a, b) = (-angle(i), -angle(i + 1));
+                Stroke::new(a.cos(), a.sin(), b.cos(), b.sin())
+            })
+            .collect();
+        for arc_fit in [ArcFit::Center, ArcFit::Radius] {
+            let settings = Settings {
+                arc_fit,
+                accuracy: 0.005,
+                y_scale: 3.0,
+                ..engrave_settings()
+            };
+            let arcs = arcs_of(&settings, &Font::from_drawing(circle.clone()));
+            assert!(!arcs.is_empty(), "{arc_fit}");
+            assert!(
+                arcs.iter().all(|l| l.contains('X') || l.contains('Y')),
+                "{arcs:?}"
+            );
+        }
+        let around_text = Settings {
+            input_type: InputType::Text,
+            text: "F".into(),
+            text_radius: 3.0,
+            add_box: true,
+            ..engrave_settings()
+        };
+        let arcs = arcs_of(&around_text, &drawing());
+        assert_eq!(arcs.len(), 1);
+        assert!(arcs[0].contains('X') && arcs[0].contains('Y'), "{arcs:?}");
     }
 
     fn carve_settings() -> Settings {

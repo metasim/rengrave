@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from `sort_for_v_carve` and `Sort_Paths` of F-Engrave 1.78.
+
 //! Path ordering: closing and orienting loops for V-carving, and minimizing rapid moves.
 
 use crate::geom::{Point, Segment, ZERO};

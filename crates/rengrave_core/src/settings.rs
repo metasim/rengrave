@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2011-2026 Scorch
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+//
+// Ported from the settings, validation, `calc_vbit_dia`, `calc_depth_limit`, `Scale_Linear_Inputs`, and
+// `Open_G_Code_File` of F-Engrave 1.78.
+
 //! The complete description of an engraving job, its validation, and derived tool values.
 //!
 //! [`Settings::to_settings_lines`] and [`Settings::apply_settings_text`] read and write the
@@ -445,7 +452,7 @@ impl Default for Settings {
             arc_fit: ArcFit::None,
             accuracy: 0.001,
             seg_arc: 5.0,
-            g_pre: "G17 G64 P0.001 M3 S3000".into(),
+            g_pre: "G17 M3 S3000".into(),
             g_post: "M5|M2".into(),
             disable_variables: true,
             no_comments: true,
@@ -793,6 +800,145 @@ impl Settings {
             flop ^= self.flip;
         }
         flop
+    }
+
+    /// Finds anything in the header and footer that FluidNC would reject.
+    ///
+    /// FluidNC refuses a whole line containing an unsupported code, so anything else on that line,
+    /// such as a spindle start, would not run. Each entry describes one problem. Lines using
+    /// expressions or named parameters are not checked.
+    pub fn controller_issues(&self) -> Vec<String> {
+        let mut issues = Vec::new();
+        for (name, text) in [("Header", &self.g_pre), ("Footer", &self.g_post)] {
+            for line in text.split('|') {
+                for word in Self::code_words(line) {
+                    if !Self::fluidnc_accepts(&word) {
+                        issues.push(format!(
+                            "{name} line \"{}\" uses {word}, which FluidNC rejects along with \
+                             everything else on that line",
+                            line.trim()
+                        ));
+                    }
+                }
+            }
+        }
+        issues
+    }
+
+    /// Returns `true` if [`Settings::remove_unsupported_codes`] would change anything.
+    pub fn has_removable_codes(&self) -> bool {
+        [&self.g_pre, &self.g_post]
+            .iter()
+            .flat_map(|text| text.split('|'))
+            .flat_map(Self::code_words)
+            .any(|word| Self::is_removable(&word))
+    }
+
+    /// Removes path blending modes (`G64`, `G61.1`) from the header and footer, which FluidNC
+    /// rejects and which only affect how smoothly corners are taken.
+    ///
+    /// Other rejected codes stay, because removing one could change what the rest of its line
+    /// does: without `G81`, the line `G81 X1 Z-1` would be a move.
+    pub fn remove_unsupported_codes(&mut self) {
+        self.g_pre = Self::without_removable_words(&self.g_pre);
+        self.g_post = Self::without_removable_words(&self.g_post);
+    }
+
+    /// Splits a line into its letter-and-value words, without comments or spaces, in upper case.
+    ///
+    /// Returns nothing for lines this cannot read reliably: expressions, named parameters, and
+    /// `$` system commands.
+    fn code_words(line: &str) -> Vec<String> {
+        let mut code = String::with_capacity(line.len());
+        let mut in_comment = false;
+        for ch in line.chars() {
+            match ch {
+                ';' if !in_comment => break,
+                '(' => in_comment = true,
+                ')' => in_comment = false,
+                c if !in_comment && !c.is_whitespace() => code.push(c.to_ascii_uppercase()),
+                _ => {}
+            }
+        }
+        if code.starts_with('$') || code.contains(['[', '<']) {
+            return Vec::new();
+        }
+        let mut words: Vec<String> = Vec::new();
+        for ch in code.chars() {
+            match words.last_mut() {
+                Some(word) if !ch.is_ascii_alphabetic() => word.push(ch),
+                _ if ch.is_ascii_alphabetic() => words.push(ch.to_string()),
+                // Text before the first letter, such as a `#1=2` assignment, is not a word.
+                _ => {}
+            }
+        }
+        words
+    }
+
+    /// Whether FluidNC accepts a word from [`Settings::code_words`]. Only `G` and `M` codes, and
+    /// words with no value at all, can be judged without knowing the rest of the line.
+    fn fluidnc_accepts(word: &str) -> bool {
+        // Tenths of a code number: G91.1 is 911.
+        const G_CODES: [i32; 41] = [
+            0, 10, 20, 30, 40, 100, 170, 180, 190, 200, 210, 280, 281, 300, 301, 382, 383, 384,
+            385, 400, 431, 490, 530, 540, 550, 560, 570, 580, 590, 591, 592, 593, 610, 800, 900,
+            910, 911, 920, 921, 930, 940,
+        ];
+        const M_CODES: [i32; 24] = [
+            0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 300, 560, 610, 620, 630, 640, 650, 660, 670,
+            680, 700, 710, 720, 730,
+        ];
+        let mut chars = word.chars();
+        let letter = chars.next().unwrap_or_default();
+        let value = chars.as_str();
+        if value.is_empty() {
+            return false;
+        }
+        // A variable's value is only known when the program runs.
+        let Ok(number) = value.parse::<f64>() else {
+            return true;
+        };
+        let code = (number * 10.0).round() as i32;
+        match letter {
+            'G' => G_CODES.contains(&code),
+            'M' => M_CODES.contains(&code),
+            _ => true,
+        }
+    }
+
+    fn is_removable(word: &str) -> bool {
+        word.strip_prefix('G')
+            .and_then(|value| value.parse::<f64>().ok())
+            .is_some_and(|n| n == 64.0 || n == 61.1)
+    }
+
+    /// Drops blending modes, along with a `P` tolerance that follows one.
+    fn without_removable_words(text: &str) -> String {
+        let lines: Vec<String> = text
+            .split('|')
+            .map(|line| {
+                if Self::code_words(line)
+                    .iter()
+                    .all(|w| !Self::is_removable(w))
+                {
+                    return line.to_string();
+                }
+                let mut kept: Vec<String> = Vec::new();
+                let mut dropped_previous = false;
+                for word in Self::code_words(line) {
+                    if Self::is_removable(&word) {
+                        dropped_previous = true;
+                    } else {
+                        if !(dropped_previous && word.starts_with('P')) {
+                            kept.push(word);
+                        }
+                        dropped_previous = false;
+                    }
+                }
+                kept.join(" ")
+            })
+            .collect();
+        lines.join("|")
     }
 
     /// Renders the settings as `(fengrave_set NAME VALUE )` comment lines.
@@ -1183,6 +1329,157 @@ mod tests {
             ..engrave
         };
         assert_eq!(image.validate()[0].field, "bmp_turd_size");
+    }
+
+    #[test]
+    fn defaults_suit_fluidnc() {
+        assert!(Settings::default().controller_issues().is_empty());
+        let old = Settings {
+            g_pre: "G17 G64 P0.001 M3 S3000".into(),
+            ..Settings::default()
+        };
+        let issues = old.controller_issues();
+        assert_eq!(issues.len(), 1);
+        assert!(
+            issues[0].contains("G64") && issues[0].contains("FluidNC"),
+            "{}",
+            issues[0]
+        );
+    }
+
+    #[test]
+    fn unsupported_codes_are_recognized_in_any_form() {
+        for header in ["g64", "G64.0", "G17|G64 P0.1", "G61.1 M3"] {
+            let s = Settings {
+                g_pre: header.into(),
+                g_post: String::new(),
+                ..Settings::default()
+            };
+            assert_eq!(s.controller_issues().len(), 1, "{header}");
+        }
+        for fine in ["G17 M3 S3000", "G61", "M64 P1", ""] {
+            let s = Settings {
+                g_pre: fine.into(),
+                g_post: String::new(),
+                ..Settings::default()
+            };
+            assert!(s.controller_issues().is_empty(), "{fine}");
+        }
+        let footer = Settings {
+            g_post: "G64|M2".into(),
+            g_pre: String::new(),
+            ..Settings::default()
+        };
+        assert!(footer.controller_issues()[0].starts_with("Footer"));
+    }
+
+    #[test]
+    fn everything_fluidnc_accepts_passes() {
+        let accepted = "G0 G1 G2 G3 G4 G10 L2 P1 G17 G18 G19 G20 G21 G28 G28.1 G30 G30.1 G38.2 G38.3 \
+                        G38.4 G38.5 G40 G43.1 Z1 G49 G53 G54 G55 G56 G57 G58 G59 G59.1 G59.2 G59.3 \
+                        G61 G80 G90 G91 G91.1 G92 G92.1 G93 G94 M0 M1 M2 M3 M4 M5 M6 T1 M7 M8 M9 M30 \
+                        M56 M61 M62 P1 M63 M64 M65 M66 M67 M68 M70 M71 M72 M73 G00 G01 M03 F100 S500";
+        for word in accepted.split_whitespace() {
+            let s = Settings {
+                g_pre: word.into(),
+                g_post: String::new(),
+                ..Settings::default()
+            };
+            assert!(
+                s.controller_issues().is_empty(),
+                "{word}: {:?}",
+                s.controller_issues()
+            );
+        }
+    }
+
+    #[test]
+    fn everything_fluidnc_rejects_is_flagged() {
+        for word in [
+            "G5", "G33", "G38.1", "G38.6", "G41", "G42", "G43", "G59.4", "G61.1", "G64", "G73",
+            "G76", "G81", "G83", "G89", "G90.1", "G95", "G96", "G98", "M10", "M31", "M100", "M3.5",
+        ] {
+            let s = Settings {
+                g_pre: word.into(),
+                g_post: String::new(),
+                ..Settings::default()
+            };
+            let issues = s.controller_issues();
+            assert_eq!(issues.len(), 1, "{word}");
+            assert!(issues[0].contains(word), "{}", issues[0]);
+        }
+    }
+
+    #[test]
+    fn check_reads_lines_as_fluidnc_does() {
+        let issues = |header: &str| {
+            let s = Settings {
+                g_pre: header.into(),
+                g_post: String::new(),
+                ..Settings::default()
+            };
+            s.controller_issues()
+        };
+        // Words may touch, in either case, and comments do not count.
+        assert_eq!(issues("g17g81x1").len(), 1);
+        assert!(issues("G17 (G81) M3").is_empty());
+        assert!(issues("G17 ; G81").is_empty());
+        // A letter with no value is not a word.
+        assert_eq!(issues("hello").len(), 5);
+        // What cannot be judged here is left alone.
+        assert!(issues("#1=2").is_empty());
+        assert!(issues("G1 X#1").is_empty());
+        assert!(issues("G1 X[1+2]").is_empty());
+        assert!(issues("$X").is_empty());
+        assert!(issues("").is_empty());
+    }
+
+    #[test]
+    fn only_blending_modes_are_removable() {
+        let s = |header: &str| Settings {
+            g_pre: header.into(),
+            ..Settings::default()
+        };
+        assert!(s("G64 P0.1").has_removable_codes());
+        assert!(s("G61.1").has_removable_codes());
+        assert!(!s("G17 M3").has_removable_codes());
+
+        // Removing a canned cycle would turn the rest of its line into a move.
+        let mut canned = s("G81 X1 Z-1");
+        assert!(!canned.has_removable_codes());
+        canned.remove_unsupported_codes();
+        assert_eq!(canned.g_pre, "G81 X1 Z-1");
+        assert_eq!(canned.controller_issues().len(), 1);
+
+        // Lines without anything to remove keep their exact text.
+        let mut plain = s("g17  (keep me)|G64 M3");
+        plain.remove_unsupported_codes();
+        assert_eq!(plain.g_pre, "g17  (keep me)|M3");
+
+        let mut compact = s("G17G64P0.001M3");
+        compact.remove_unsupported_codes();
+        assert_eq!(compact.g_pre, "G17 M3");
+    }
+
+    #[test]
+    fn removal_keeps_the_rest_of_the_line() {
+        let mut s = Settings {
+            g_pre: "G17 G64 P0.001 M3 S3000".into(),
+            ..Settings::default()
+        };
+        s.remove_unsupported_codes();
+        assert_eq!(s.g_pre, "G17 M3 S3000");
+        assert_eq!(s.g_post, "M5|M2");
+        assert!(s.controller_issues().is_empty());
+
+        s.g_pre = "G64 M3 S1|G17 G61.1 P5 M8".into();
+        s.remove_unsupported_codes();
+        assert_eq!(s.g_pre, "M3 S1|G17 M8");
+
+        // A P word only goes with the code it follows.
+        s.g_pre = "M64 P1".into();
+        s.remove_unsupported_codes();
+        assert_eq!(s.g_pre, "M64 P1");
     }
 
     #[test]

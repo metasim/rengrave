@@ -32,6 +32,14 @@ A user of the program works through four questions, in order:
 | 13 | G-code can only be seen after saving it or copying it elsewhere. | Checking the output takes a round trip through another program. | A **G-code** view next to the preview shows the program with syntax highlighting, updated with the settings. Rapid moves, cutting moves, and depths are told apart at a glance. |
 | 14 | The light-gray Tk layout has a fixed size for many controls. | It scales poorly and does not follow system themes. | The panel is resizable, the preview fills the window, and light and dark themes are both supported. |
 
+## Added after the review: Simulate
+
+The **Simulate** tab sits beside Preview and G-code. It plays the G-code program and cuts into a
+shaded model of the stock, with play, restart, finish, speed, and a scrub bar that moves in either
+direction. It shares its pan and zoom with Preview, shows the current G-code line, and flags rapid
+moves that cut into the stock. Choosing the speed from the program's length keeps long jobs
+watchable.
+
 ## What stays the same
 
 - The terminology of the original's manual (Finish stock, Step over, Drive to corner, and so on),
@@ -43,7 +51,7 @@ A user of the program works through four questions, in order:
 
 Candidates for later, all judged beyond a light review:
 
-- A simulated 3D view of the carved result
+- A 3D view of the simulated result
 - A library of named bits
 - Machining time estimates that account for multi-pass and rapid moves
 - Undo and redo

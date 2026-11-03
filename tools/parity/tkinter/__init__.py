@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
 """Minimal stand-in for tkinter so F-Engrave's batch path runs without a display."""
 TRUE, FALSE = True, False
 ALL = "all"

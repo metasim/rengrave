@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Simeon H.K. Fitch
+
 //! Command-line front end for `rengrave_core`: generates G-code, SVG, and DXF from text or images.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -417,7 +420,7 @@ impl JobArgs {
         let settings = self.settings()?;
         settings.ensure_valid().map_err(|e| e.to_string())?;
         let job = Job::load(settings).map_err(|e| e.to_string())?;
-        for warning in &job.warnings {
+        for warning in job.warnings.iter().chain(&job.settings.controller_issues()) {
             eprintln!("warning: {warning}");
         }
         Ok(job)
