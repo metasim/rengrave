@@ -930,7 +930,7 @@ impl RengraveApp {
                 });
                 ui.menu_button("Help", |ui| {
                     if ui
-                        .menu_item(true, icons::INFO, "About rengrave", None)
+                        .menu_item(true, icons::INFO, "About Rengrave", None)
                         .clicked()
                     {
                         self.show_about = true;
@@ -1140,12 +1140,12 @@ impl RengraveApp {
 
     fn about_window(&mut self, ui: &mut Ui) {
         let mut open = self.show_about;
-        egui::Window::new("About rengrave")
+        egui::Window::new("About Rengrave")
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
             .show(ui.ctx(), |ui| {
-                ui.label(format!("rengrave {}", env!("CARGO_PKG_VERSION")));
+                ui.label(format!("Rengrave {}", env!("CARGO_PKG_VERSION")));
                 ui.label("A Rust port of F-Engrave 1.78 by Scorch (scorchworks.com).");
                 ui.label("Licensed under the GNU GPL, version 3 or later.");
             });

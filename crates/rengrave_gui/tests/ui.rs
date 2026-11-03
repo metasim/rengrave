@@ -254,7 +254,7 @@ fn all_menus_open() {
     for (menu, item) in [
         ("File", "Export SVG…"),
         ("View", "Fit design"),
-        ("Help", "About rengrave"),
+        ("Help", "About Rengrave"),
     ] {
         click(&mut harness, menu);
         assert!(
@@ -270,7 +270,7 @@ fn all_menus_open() {
 fn about_window_opens() {
     let (mut harness, _) = harness();
     click(&mut harness, "Help");
-    click(&mut harness, "About rengrave");
+    click(&mut harness, "About Rengrave");
     assert!(harness.query_by_label_contains("GNU GPL").is_some());
 }
 
