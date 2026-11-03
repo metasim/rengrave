@@ -112,13 +112,7 @@ impl Bitmap {
                 let mut path = vec![start];
                 let mut prev_dir = (0, 0);
                 let mut cur = start;
-                loop {
-                    let Some(options) = cracks.get_mut(&cur) else {
-                        break;
-                    };
-                    if options.is_empty() {
-                        break;
-                    }
+                while let Some(options) = cracks.get_mut(&cur).filter(|o| !o.is_empty()) {
                     let index = Self::choose_exit(options, cur, prev_dir, connect);
                     let next = options.swap_remove(index);
                     prev_dir = (next.0 - cur.0, next.1 - cur.1);
