@@ -9,7 +9,7 @@ authors.workspace = true
 readme = "README.md"
 
 [[bin]]
-name = "rengrave"
+name = "rengrave-cli"
 path = "src/main.rs"
 
 [dependencies]
