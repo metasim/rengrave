@@ -274,7 +274,7 @@ impl CarvePath {
     ///
     /// For image input, `design`'s segments are first replaced by closed, oriented loops, as
     /// produced by [`Segment::sort_into_loops`]. Progress is reported in terms of outline length, and
-    /// canceling returns [`Error::Canceled`].
+    /// canceling returns [`crate::Error::Canceled`].
     pub fn calculate(
         design: &mut Design,
         settings: &Settings,
