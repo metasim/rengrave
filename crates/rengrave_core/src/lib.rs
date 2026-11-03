@@ -1,1 +1,60 @@
-//! placeholder
+//! Toolpath engine for engraving and V-carving text and images.
+//!
+//! `rengrave_core` is a Rust port of the calculations in
+//! [F-Engrave](https://www.scorchworks.com/Fengrave/fengrave.html). It has no user interface;
+//! the `rengrave_cli` and `rengrave_gui` crates are front ends to it.
+//!
+//! A job passes through these stages:
+//!
+//! 1. Load the source glyphs: [`Job::load`] reads the font or image named by the [`Settings`].
+//! 2. Position the outlines: [`Job::layout`] produces a [`Design`].
+//! 3. Calculate depths, if V-carving: [`CarvePath::calculate`].
+//! 4. Write the result: [`GcodeProgram::generate`], [`export::write_svg`], or
+//!    [`export::write_dxf`]. [`CleanupPaths`] and [`GcodeProgram::generate_cleanup`] produce the
+//!    optional secondary operations.
+//!
+//! [`Job::generate_gcode`] runs stages 2 through 4 in one call:
+//!
+//! ```
+//! use rengrave_core::{CutType, Job, Progress, Settings};
+//!
+//! let settings = Settings {
+//!     text: "Hi".into(),
+//!     cut_type: CutType::VCarve,
+//!     ..Settings::default()
+//! };
+//! let job = Job::load(settings)?;
+//! let gcode = job.generate_gcode(&Progress::none())?;
+//! assert!(gcode.iter().any(|line| line.starts_with("G1 ")));
+//! # Ok::<(), rengrave_core::Error>(())
+//! ```
+
+#![warn(missing_docs)]
+
+pub mod cleanup;
+pub mod design;
+pub mod dxf;
+mod error;
+pub mod export;
+pub mod font;
+pub mod gcode;
+pub mod geom;
+mod job;
+mod progress;
+pub mod settings;
+pub mod sort;
+pub mod trace;
+pub mod vcarve;
+
+pub use cleanup::CleanupPaths;
+pub use design::Design;
+pub use error::{Error, Result};
+pub use font::{BuiltinFont, Font};
+pub use gcode::GcodeProgram;
+pub use job::Job;
+pub use progress::Progress;
+pub use settings::{
+    ArcFit, BitShape, CheckScope, CleanupBit, CleanupOps, CutType, HeightCalc, InputType, Issue,
+    Justify, Origin, Settings, Tracer, TurnPolicy, Units,
+};
+pub use vcarve::{CarvePath, CarvePoint};

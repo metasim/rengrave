@@ -1,0 +1,36 @@
+# name | text | settings ("key value", separated by ';')
+engrave_default | AB |
+engrave_mm | AB gO | units mm;YSCALE 25;STHICK 0.25;ZSAFE 5;ZCUT -0.2;FEED 300;accuracy 0.02
+engrave_plunge | AB | PLUNGE 2
+engrave_variables | AB | var_dis 0
+engrave_circle | ABOg | TRADIUS 3;plotbox 1;justify Center;origin Mid-Center
+engrave_inside_bottom | ABO | TRADIUS 4;outer 0;upper 0;justify Right
+engrave_rotate_mirror | ABg | TANGLE 30;mirror 1;flip 1;origin Top-Right;xorigin 1;yorigin -2
+engrave_box | AB | plotbox 1;boxgap 0.1;origin Bot-Left;XSCALE 75;CSPACE 10
+engrave_arcs | OO | arc_fit center;segarc 2
+engrave_radius_arcs | OO | arc_fit radius;segarc 2
+engrave_max_all | AA | H_CALC max_all
+engrave_header_footer | A | gpre G17|M3 S100;gpost M5|M30
+vcarve_default | ABO | cut_type v-carve;YSCALE 1;v_step_len 0.02
+vcarve_mm | Ag | cut_type v-carve;units mm;YSCALE 20;v_bit_dia 6;v_step_len 0.25;ZSAFE 5;FEED 300;accuracy 0.02
+vcarve_chr_scope | AB | cut_type v-carve;YSCALE 1;v_check_all chr;v_step_len 0.02;CSPACE 0
+vcarve_depth_limit | BO | cut_type v-carve;YSCALE 1;v_depth_lim -0.05;v_step_len 0.02
+vcarve_arcs | O | cut_type v-carve;YSCALE 1;arc_fit center;v_step_len 0.01;accuracy 0.002
+vcarve_ball | AO | cut_type v-carve;bit_shape BALL;YSCALE 1;v_bit_dia 0.25;v_step_len 0.02
+vcarve_ball_limit | AO | cut_type v-carve;bit_shape BALL;YSCALE 1;v_bit_dia 0.25;v_depth_lim -0.05;v_step_len 0.02
+vcarve_flat | O | cut_type v-carve;bit_shape FLAT;YSCALE 2;v_bit_dia 0.1;v_depth_lim -0.05;v_step_len 0.02
+vcarve_flat_multipass | O | cut_type v-carve;bit_shape FLAT;YSCALE 2;v_bit_dia 0.1;v_depth_lim -0.2;v_step_len 0.02;v_rough_stk 0.01;v_max_cut -0.08
+vcarve_multipass | AB | cut_type v-carve;YSCALE 1;v_rough_stk 0.01;v_max_cut -0.05;v_step_len 0.02
+vcarve_flop | AB | cut_type v-carve;YSCALE 1;v_flop 1;v_step_len 0.02
+vcarve_box | AB | cut_type v-carve;YSCALE 1;plotbox 1;boxgap 0.2;v_step_len 0.02
+vcarve_mirror | Ag | cut_type v-carve;YSCALE 1;mirror 1;v_step_len 0.02
+vcarve_flip_box | Ag | cut_type v-carve;YSCALE 1;flip 1;plotbox 1;boxgap 0.2;v_step_len 0.02
+vcarve_circle | ABO | cut_type v-carve;YSCALE 0.5;TRADIUS 2;justify Center;v_step_len 0.02
+vcarve_inlay | AB | cut_type v-carve;YSCALE 1;inlay 1;allowance -0.02;plotbox 1;boxgap 0.1;v_flop 1;v_step_len 0.02
+vcarve_tight_corners | AB | cut_type v-carve;YSCALE 1;v_drv_crner 90;v_stp_crner 270;v_step_len 0.02
+image_engrave | - | input_type image;YSCALE 2;imagefile drawing.dxf
+image_percent | - | input_type image;useIMGsize 1;YSCALE 50;imagefile drawing.dxf
+image_vcarve | - | input_type image;cut_type v-carve;YSCALE 1;imagefile drawing.dxf;v_step_len 0.02
+image_vcarve_flop | - | input_type image;cut_type v-carve;YSCALE 1;imagefile drawing.dxf;v_flop 1;v_step_len 0.02
+image_vcarve_box | - | input_type image;cut_type v-carve;YSCALE 1;plotbox 1;boxgap 0.2;imagefile drawing.dxf;v_step_len 0.02
+image_rotate | - | input_type image;cut_type v-carve;YSCALE 1;TANGLE 45;mirror 1;origin Mid-Center;imagefile drawing.dxf;v_step_len 0.02
