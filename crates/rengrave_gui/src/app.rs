@@ -1074,28 +1074,22 @@ impl RengraveApp {
                 );
                 self.active_view = view;
             });
-        // The tools belong to the pane, so that the tabs connect to it directly.
-        egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(8, 4))
-            .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| match self.active_view {
-                    ActiveView::Preview => self.preview_toolbar(ui),
-                    ActiveView::Simulator => {
-                        self.fit_button(ui);
-                        self.simulator.toolbar(ui);
-                    }
-                    ActiveView::Gcode => {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .icon_button(self.can_write_gcode(), icons::COPY, "Copy")
-                                .clicked()
-                            {
-                                self.copy_gcode();
-                            }
-                        });
-                    }
+        // The tools belong to the pane, so that the tabs connect to it directly. The G-code view
+        // has only a Copy button, which floats over the text instead of taking a row.
+        if self.active_view != ActiveView::Gcode {
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(8, 4))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| match self.active_view {
+                        ActiveView::Simulator => {
+                            self.fit_button(ui);
+                            self.simulator.toolbar(ui);
+                        }
+                        _ => self.preview_toolbar(ui),
+                    });
                 });
-            });
+        }
+        let view_corner = ui.available_rect_before_wrap().right_top();
         match self.active_view {
             ActiveView::Preview => {
                 let scene = Scene {
@@ -1107,9 +1101,28 @@ impl RengraveApp {
                 self.preview
                     .show(ui, &scene, &self.settings, self.scene_revision);
             }
-            ActiveView::Gcode => self.gcode_view(ui),
+            ActiveView::Gcode => {
+                self.gcode_view(ui);
+                self.copy_overlay(ui, view_corner);
+            }
             ActiveView::Simulator => self.simulator_view(ui),
         }
+    }
+
+    /// A Copy button floating at the top right of the G-code text, clear of its scroll bar.
+    fn copy_overlay(&mut self, ui: &mut Ui, corner: egui::Pos2) {
+        egui::Area::new(egui::Id::unique("gcode_copy"))
+            .order(egui::Order::Foreground)
+            .pivot(egui::Align2::RIGHT_TOP)
+            .fixed_pos(corner + egui::vec2(-24.0, 8.0))
+            .show(ui.ctx(), |ui| {
+                if ui
+                    .icon_button(self.can_write_gcode(), icons::COPY, "Copy")
+                    .clicked()
+                {
+                    self.copy_gcode();
+                }
+            });
     }
 
     fn simulator_view(&mut self, ui: &mut Ui) {
