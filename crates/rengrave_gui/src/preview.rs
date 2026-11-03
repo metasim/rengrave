@@ -3,7 +3,7 @@
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2};
 use rengrave_core::geom::Bounds;
-use rengrave_core::{CarvePoint, CutType, Design, Settings};
+use rengrave_core::{CarvePath, CarvePoint, CutType, Design, Settings};
 use std::sync::Arc;
 
 /// Colors that hold up against the theme's panel color.
@@ -129,8 +129,8 @@ impl Default for Layers {
 pub struct Scene {
     /// The positioned outline.
     pub design: Option<Arc<Design>>,
-    /// V-carve tool positions.
-    pub carve: Option<Arc<Vec<CarvePoint>>>,
+    /// The V-carve toolpath.
+    pub carve: Option<Arc<CarvePath>>,
     /// Straight-bit cleanup positions.
     pub clean_straight: Option<Arc<Vec<CarvePoint>>>,
     /// V-bit cleanup positions.
@@ -141,7 +141,7 @@ pub struct Scene {
 #[derive(Clone, PartialEq)]
 struct CacheKey {
     transform: ViewTransform,
-    generation: u64,
+    revision: u64,
     show: [bool; 6],
     dark: bool,
     thickness: f64,
@@ -190,7 +190,7 @@ impl Preview {
         ui: &mut Ui,
         scene: &Scene,
         settings: &Settings,
-        generation: u64,
+        revision: u64,
     ) -> Response {
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         response
@@ -257,7 +257,7 @@ impl Preview {
         }
         let key = CacheKey {
             transform,
-            generation,
+            revision,
             show: [
                 settings.show_box,
                 settings.show_thick,
@@ -400,7 +400,7 @@ impl Preview {
                 0.0
             };
             shapes.push(Self::discs_mesh(
-                carve,
+                &carve.points,
                 r_trim,
                 t,
                 palette.carve_area,
@@ -436,7 +436,12 @@ impl Preview {
             && settings.show_v_path
             && let Some(carve) = &scene.carve
         {
-            Self::path_lines(carve, t, Stroke::new(1.0, palette.carve_path), &mut shapes);
+            Self::path_lines(
+                &carve.points,
+                t,
+                Stroke::new(1.0, palette.carve_path),
+                &mut shapes,
+            );
         }
         if layers.clean_straight
             && let Some(points) = &scene.clean_straight

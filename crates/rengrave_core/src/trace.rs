@@ -63,8 +63,8 @@ impl Bitmap {
     fn connect_set_pixels(&self, policy: TurnPolicy) -> bool {
         let set = self.pixels.iter().filter(|&&p| p).count();
         match policy {
-            TurnPolicy::Black | TurnPolicy::Right | TurnPolicy::Random => true,
-            TurnPolicy::White | TurnPolicy::Left => false,
+            TurnPolicy::Black | TurnPolicy::Left | TurnPolicy::Random => true,
+            TurnPolicy::White | TurnPolicy::Right => false,
             TurnPolicy::Minority => set * 2 <= self.pixels.len(),
             TurnPolicy::Majority => set * 2 > self.pixels.len(),
         }
@@ -272,7 +272,7 @@ impl Bitmap {
         strokes
     }
 
-    /// Serializes the bitmap as a plain PBM image, the input format of `potrace`.
+    /// Serializes the bitmap as a binary PBM image, the input format of `potrace`.
     fn to_pbm(&self) -> Vec<u8> {
         let mut out = format!("P4\n{} {}\n", self.width, self.height).into_bytes();
         for row in self.pixels.chunks(self.width.max(1)) {
@@ -458,8 +458,8 @@ mod tests {
     #[test]
     fn diagonal_pixels_follow_the_turn_policy() {
         let b = bitmap(&["#.", ".#"]);
-        assert_eq!(b.boundary_loops(TurnPolicy::Left).len(), 2);
-        assert_eq!(b.boundary_loops(TurnPolicy::Right).len(), 1);
+        assert_eq!(b.boundary_loops(TurnPolicy::Right).len(), 2);
+        assert_eq!(b.boundary_loops(TurnPolicy::Left).len(), 1);
     }
 
     #[test]

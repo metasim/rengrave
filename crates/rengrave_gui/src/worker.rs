@@ -14,14 +14,19 @@ enum Command {
         generation: u64,
         settings: Box<Settings>,
         carve: bool,
+        reload: bool,
         progress: Progress,
     },
     Cleanup {
         generation: u64,
+        request: u64,
         settings: Box<Settings>,
         design: Arc<Design>,
     },
 }
+
+/// Tool positions for the straight bit and for the V-bit.
+pub type CleanupResult = (Arc<Vec<CarvePoint>>, Arc<Vec<CarvePoint>>);
 
 /// A result from the background thread.
 pub enum Update {
@@ -43,14 +48,14 @@ pub enum Update {
         /// The toolpath.
         carve: Arc<CarvePath>,
     },
-    /// Cleanup toolpaths are finished.
+    /// A cleanup calculation stopped.
     Cleanup {
-        /// The request this answers.
+        /// The calculation whose design this used.
         generation: u64,
-        /// Paths for the straight bit.
-        straight: Arc<Vec<CarvePoint>>,
-        /// Paths for the V-bit.
-        v_bit: Arc<Vec<CarvePoint>>,
+        /// The cleanup request this answers.
+        request: u64,
+        /// Paths for the straight bit and for the V-bit, or why there are none.
+        paths: Result<CleanupResult, String>,
     },
     /// The calculation stopped.
     Stopped {
@@ -94,8 +99,9 @@ impl Worker {
         }
     }
 
-    /// Requests a new calculation, canceling any that is running.
-    pub fn calculate(&self, generation: u64, settings: Settings, carve: bool) {
+    /// Requests a new calculation, canceling any that is running. With `reload`, the font or
+    /// image is read again even if the settings still name the same file.
+    pub fn calculate(&self, generation: u64, settings: Settings, carve: bool, reload: bool) {
         let progress = Progress::none();
         if let Ok(mut active) = self.active.lock()
             && let Some(old) = active.replace(progress.clone())
@@ -108,14 +114,16 @@ impl Worker {
             generation,
             settings: Box::new(settings),
             carve,
+            reload,
             progress,
         });
     }
 
     /// Requests cleanup paths for a finished design.
-    pub fn cleanup(&self, generation: u64, settings: Settings, design: Arc<Design>) {
+    pub fn cleanup(&self, generation: u64, request: u64, settings: Settings, design: Arc<Design>) {
         let _ = self.commands.send(Command::Cleanup {
             generation,
+            request,
             settings: Box::new(settings),
             design,
         });
@@ -165,13 +173,20 @@ impl ThreadState {
                         generation,
                         settings,
                         carve,
+                        reload,
                         progress,
-                    } => self.calculate(generation, *settings, carve, &progress),
+                    } => {
+                        if reload {
+                            self.job = None;
+                        }
+                        self.calculate(generation, *settings, carve, &progress);
+                    }
                     Command::Cleanup {
                         generation,
+                        request,
                         settings,
                         design,
-                    } => self.cleanup(generation, &settings, &design),
+                    } => self.cleanup(generation, request, &settings, &design),
                 }
             }
         }
@@ -244,28 +259,17 @@ impl ThreadState {
         Ok(())
     }
 
-    fn cleanup(&mut self, generation: u64, settings: &Settings, design: &Design) {
-        let outcome =
-            CleanupPaths::calculate(design, settings, CleanupBit::Straight).and_then(|straight| {
+    fn cleanup(&mut self, generation: u64, request: u64, settings: &Settings, design: &Design) {
+        let paths = CleanupPaths::calculate(design, settings, CleanupBit::Straight)
+            .and_then(|straight| {
                 let v_bit = CleanupPaths::calculate(design, settings, CleanupBit::VBit)?;
-                Ok((straight.points, v_bit.points))
-            });
-        match outcome {
-            Ok((straight, v_bit)) => {
-                self.send(Update::Cleanup {
-                    generation,
-                    straight: Arc::new(straight),
-                    v_bit: Arc::new(v_bit),
-                });
-                self.send(Update::Stopped {
-                    generation,
-                    error: None,
-                });
-            }
-            Err(e) => self.send(Update::Stopped {
-                generation,
-                error: Some(e.to_string()),
-            }),
-        }
+                Ok((Arc::new(straight.points), Arc::new(v_bit.points)))
+            })
+            .map_err(|e| e.to_string());
+        self.send(Update::Cleanup {
+            generation,
+            request,
+            paths,
+        });
     }
 }

@@ -160,9 +160,9 @@ named_enum!(
         Black => "black",
         /// Connect background pixels.
         White => "white",
-        /// Always turn right, which connects design pixels in the native tracer.
+        /// Always turn right, which keeps diagonal design pixels apart in the native tracer.
         Right => "right",
-        /// Always turn left, which connects background pixels in the native tracer.
+        /// Always turn left, which connects diagonal design pixels in the native tracer.
         Left => "left",
         /// Connect whichever color is less common in the image.
         Minority => "minority",
@@ -500,42 +500,32 @@ impl Settings {
     }
 
     /// Returns every problem that would prevent a correct result.
+    ///
+    /// Only settings that affect the job as configured are checked: the box gap only when a box
+    /// is added, tool settings only when V-carving, and so on.
     pub fn validate(&self) -> Vec<Issue> {
+        let positive = |v: f64| v > 0.0 && v.is_finite();
+        let non_negative = |v: f64| v >= 0.0 && v.is_finite();
+        let non_positive = |v: f64| v <= 0.0 && v.is_finite();
+
         let mut issues = Vec::new();
         let mut check = |ok: bool, field: &'static str, message: &'static str| {
             if !ok {
                 issues.push(Issue { field, message });
             }
         };
+        let is_text = self.input_type == InputType::Text;
+        let is_carve = self.cut_type == CutType::VCarve;
+
         check(
-            self.y_scale > 0.0,
+            positive(self.y_scale),
             "y_scale",
             "Height should be greater than 0",
         );
         check(
-            self.x_scale > 0.0,
+            positive(self.x_scale),
             "x_scale",
             "Width should be greater than 0",
-        );
-        check(
-            self.stroke_thickness >= 0.0,
-            "stroke_thickness",
-            "Thickness should be greater than or equal to 0",
-        );
-        check(
-            self.line_space >= 0.0,
-            "line_space",
-            "Line space should be greater than or equal to 0",
-        );
-        check(
-            self.char_space >= 0.0,
-            "char_space",
-            "Character space should be greater than or equal to 0",
-        );
-        check(
-            self.word_space >= 0.0,
-            "word_space",
-            "Word space should be greater than or equal to 0",
         );
         check(
             self.angle > -360.0 && self.angle < 360.0,
@@ -543,105 +533,158 @@ impl Settings {
             "Angle should be between -360 and 360",
         );
         check(
-            self.text_radius >= 0.0,
-            "text_radius",
-            "Radius should be greater than or equal to 0",
+            self.x_origin.is_finite(),
+            "x_origin",
+            "X offset should be a number",
         );
-        check(self.feed > 0.0, "feed", "Feed should be greater than 0");
         check(
-            self.plunge >= 0.0,
+            self.y_origin.is_finite(),
+            "y_origin",
+            "Y offset should be a number",
+        );
+        check(positive(self.feed), "feed", "Feed should be greater than 0");
+        check(
+            non_negative(self.plunge),
             "plunge",
             "Plunge rate should be greater than or equal to 0",
         );
         check(
-            self.seg_arc > 0.0,
+            self.z_safe.is_finite(),
+            "z_safe",
+            "Safe Z should be a number",
+        );
+        check(
+            self.z_cut.is_finite(),
+            "z_cut",
+            "Engrave depth should be a number",
+        );
+        check(
+            positive(self.seg_arc),
             "seg_arc",
             "Arc angle should be greater than 0",
         );
         check(
-            self.accuracy > 0.0,
+            positive(self.accuracy),
             "accuracy",
             "Accuracy should be greater than 0",
         );
+        if self.add_box {
+            check(
+                positive(self.box_gap),
+                "box_gap",
+                "Gap should be greater than 0",
+            );
+        }
+        if is_text {
+            check(
+                non_negative(self.line_space),
+                "line_space",
+                "Line space should be greater than or equal to 0",
+            );
+            check(
+                non_negative(self.char_space),
+                "char_space",
+                "Character space should be greater than or equal to 0",
+            );
+            check(
+                non_negative(self.word_space),
+                "word_space",
+                "Word space should be greater than or equal to 0",
+            );
+            check(
+                non_negative(self.text_radius),
+                "text_radius",
+                "Radius should be greater than or equal to 0",
+            );
+        } else {
+            check(
+                self.bmp_turd_size >= 1.0 && self.bmp_turd_size.is_finite(),
+                "bmp_turd_size",
+                "Speckle size should be greater than or equal to 1",
+            );
+            check(
+                (0.0..=4.0 / 3.0).contains(&self.bmp_alpha_max),
+                "bmp_alpha_max",
+                "Corner smoothing should be between 0 and 1.333",
+            );
+            check(
+                non_negative(self.bmp_opt_tolerance),
+                "bmp_opt_tolerance",
+                "Curve tolerance should be greater than or equal to 0",
+            );
+        }
+        if !is_carve {
+            check(
+                non_negative(self.stroke_thickness),
+                "stroke_thickness",
+                "Thickness should be greater than or equal to 0",
+            );
+            return issues;
+        }
+
+        if self.bit_shape == BitShape::VBit {
+            check(
+                self.v_bit_angle > 0.0 && self.v_bit_angle < 180.0,
+                "v_bit_angle",
+                "Bit angle should be between 0 and 180",
+            );
+        }
         check(
-            self.box_gap > 0.0,
-            "box_gap",
-            "Gap should be greater than 0",
-        );
-        check(
-            (0.0..=180.0).contains(&self.v_bit_angle),
-            "v_bit_angle",
-            "Angle should be between 0 and 180",
-        );
-        check(
-            self.v_bit_dia > 0.0,
+            positive(self.v_bit_dia),
             "v_bit_dia",
-            "Diameter should be greater than 0",
+            "Bit diameter should be greater than 0",
         );
         check(
-            self.v_depth_limit <= 0.0,
+            non_positive(self.v_depth_limit),
             "v_depth_limit",
             "Depth limit should be less than or equal to 0",
         );
         check(
             self.v_drive_corner > 0.0 && self.v_drive_corner < 180.0,
             "v_drive_corner",
-            "Angle should be between 0 and 180",
+            "Drive to corner should be between 0 and 180",
         );
         check(
             self.v_step_corner > 180.0 && self.v_step_corner < 360.0,
             "v_step_corner",
-            "Angle should be between 180 and 360",
+            "Step around corner should be between 180 and 360",
         );
         check(
-            self.v_step_len > 0.0,
+            positive(self.v_step_len),
             "v_step_len",
-            "Step size should be greater than 0",
+            "Step length should be greater than 0",
         );
         check(
-            self.allowance <= 0.0,
+            non_positive(self.allowance),
             "allowance",
-            "Allowance should be less than or equal to 0",
+            "Overcut should be less than or equal to 0",
         );
         check(
-            self.v_max_cut < 0.0,
-            "v_max_cut",
-            "Max depth per pass should be less than 0",
-        );
-        check(
-            self.v_rough_stock >= 0.0,
+            non_negative(self.v_rough_stock),
             "v_rough_stock",
-            "Finish pass stock should be positive or zero",
+            "Finish stock should be positive or zero",
         );
+        if self.v_rough_stock > 0.0 {
+            check(
+                self.v_max_cut < 0.0 && self.v_max_cut.is_finite(),
+                "v_max_cut",
+                "Depth per pass should be less than 0",
+            );
+        }
         check(
-            self.clean_v >= 0.0,
+            non_negative(self.clean_v),
             "clean_v",
-            "Width should be greater than or equal to 0",
+            "V-bit step should be greater than or equal to 0",
         );
         check(
-            self.clean_dia > 0.0,
+            positive(self.clean_dia),
             "clean_dia",
-            "Diameter should be greater than 0",
+            "Straight bit should be greater than 0",
         );
         check(
             self.clean_step > 0.0 && self.clean_step <= 100.0,
             "clean_step",
             "Step over should be between 0% and 100%",
-        );
-        check(
-            self.bmp_turd_size >= 1.0,
-            "bmp_turd_size",
-            "Speckle size should be greater than or equal to 1",
-        );
-        check(
-            (0.0..=4.0 / 3.0).contains(&self.bmp_alpha_max),
-            "bmp_alpha_max",
-            "Alpha max should be between 0 and 1.333",
-        );
-        check(
-            self.bmp_opt_tolerance >= 0.0,
-            "bmp_opt_tolerance",
-            "Tolerance should be greater than or equal to 0",
         );
         issues
     }
@@ -1031,6 +1074,7 @@ mod tests {
     #[test]
     fn validation_reports_each_bad_field() {
         let settings = Settings {
+            cut_type: CutType::VCarve,
             y_scale: 0.0,
             feed: -1.0,
             v_step_corner: 90.0,
@@ -1041,6 +1085,104 @@ mod tests {
         let fields: Vec<_> = issues.iter().map(|i| i.field).collect();
         assert_eq!(fields, ["y_scale", "feed", "v_step_corner", "clean_step"]);
         assert!(settings.ensure_valid().is_err());
+    }
+
+    #[test]
+    fn non_finite_values_are_rejected() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let cases = [
+                Settings {
+                    y_scale: bad,
+                    ..Settings::default()
+                },
+                Settings {
+                    z_safe: bad,
+                    ..Settings::default()
+                },
+                Settings {
+                    z_cut: bad,
+                    ..Settings::default()
+                },
+                Settings {
+                    x_origin: bad,
+                    ..Settings::default()
+                },
+                Settings {
+                    feed: bad,
+                    ..Settings::default()
+                },
+                Settings {
+                    cut_type: CutType::VCarve,
+                    v_bit_dia: bad,
+                    ..Settings::default()
+                },
+                Settings {
+                    cut_type: CutType::VCarve,
+                    v_step_len: bad,
+                    ..Settings::default()
+                },
+            ];
+            for case in cases {
+                assert!(!case.validate().is_empty(), "{bad} should be rejected");
+            }
+        }
+    }
+
+    #[test]
+    fn v_bit_needs_a_real_angle() {
+        for angle in [0.0, 180.0] {
+            let v_bit = Settings {
+                cut_type: CutType::VCarve,
+                v_bit_angle: angle,
+                ..Settings::default()
+            };
+            assert_eq!(v_bit.validate()[0].field, "v_bit_angle");
+            let ball = Settings {
+                bit_shape: BitShape::Ball,
+                ..v_bit
+            };
+            assert!(
+                ball.validate().is_empty(),
+                "the angle is unused by a ball bit"
+            );
+        }
+    }
+
+    #[test]
+    fn settings_that_do_not_apply_are_not_checked() {
+        let engrave = Settings {
+            box_gap: 0.0,
+            clean_dia: 0.0,
+            clean_step: 0.0,
+            v_bit_dia: 0.0,
+            v_max_cut: 1.0,
+            bmp_turd_size: 0.0,
+            ..Settings::default()
+        };
+        assert!(engrave.validate().is_empty());
+
+        let boxed = Settings {
+            add_box: true,
+            ..engrave.clone()
+        };
+        assert_eq!(boxed.validate()[0].field, "box_gap");
+
+        let carve = Settings {
+            cut_type: CutType::VCarve,
+            ..engrave.clone()
+        };
+        let fields: Vec<_> = carve.validate().iter().map(|i| i.field).collect();
+        assert!(fields.contains(&"v_bit_dia") && fields.contains(&"clean_dia"));
+        assert!(
+            !fields.contains(&"v_max_cut"),
+            "unused without finish stock"
+        );
+
+        let image = Settings {
+            input_type: InputType::Image,
+            ..engrave
+        };
+        assert_eq!(image.validate()[0].field, "bmp_turd_size");
     }
 
     #[test]

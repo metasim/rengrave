@@ -38,6 +38,9 @@ struct SegmentCircle {
     r: f64,
 }
 
+/// Upper limit on grid cells, which bounds memory use for huge designs and very small bits.
+const MAX_CELLS: usize = 1 << 22;
+
 /// Which outline neighbors to test, by uniform grid cell.
 struct Partitions {
     cells: Vec<Vec<u32>>,
@@ -53,8 +56,16 @@ impl Partitions {
     fn new(segments: &[Segment], design: &Design, rmax: f64, dline: f64) -> Self {
         let x_length = design.bounds.width();
         let y_length = design.bounds.height();
-        let x_minus_1 = ((x_length / ((2.0 * rmax + dline) * 1.1)) as usize).max(1);
-        let y_minus_1 = ((y_length / ((2.0 * rmax + dline) * 1.1)) as usize).max(1);
+        let mut x_minus_1 = ((x_length / ((2.0 * rmax + dline) * 1.1)) as usize).max(1);
+        let mut y_minus_1 = ((y_length / ((2.0 * rmax + dline) * 1.1)) as usize).max(1);
+        // Larger cells only add candidates to check, so coarsening keeps results correct.
+        while (x_minus_1 + 1).saturating_mul(y_minus_1 + 1) > MAX_CELLS {
+            if x_minus_1 > y_minus_1 {
+                x_minus_1 = (x_minus_1 / 2).max(1);
+            } else {
+                y_minus_1 = (y_minus_1 / 2).max(1);
+            }
+        }
         let mut x_len = x_length / x_minus_1 as f64;
         let mut y_len = y_length / y_minus_1 as f64;
         let x_cells = x_minus_1 + 1;
@@ -698,6 +709,23 @@ mod tests {
         for (i, s) in design.segments.iter().enumerate() {
             let mid = ((s.x1 + s.x2) / 2.0, (s.y1 + s.y2) / 2.0);
             assert!(parts.at(mid.0, mid.1).contains(&(i as u32)));
+        }
+    }
+
+    #[test]
+    fn partition_count_is_bounded_and_coarsening_keeps_neighbors() {
+        let settings = carve_settings();
+        let mut design = Design::layout(&square_font(1.0), &settings).unwrap();
+        design.segments = Segment::sort_into_loops(&design.segments, settings.accuracy);
+        // A tool this small would otherwise need about 10^14 cells.
+        let parts = Partitions::new(&design.segments, &design, 1e-8, 1e-8);
+        assert!(parts.cells.len() <= MAX_CELLS);
+        for (i, s) in design.segments.iter().enumerate() {
+            assert!(
+                parts
+                    .at((s.x1 + s.x2) / 2.0, (s.y1 + s.y2) / 2.0)
+                    .contains(&(i as u32))
+            );
         }
     }
 

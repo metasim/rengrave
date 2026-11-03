@@ -65,10 +65,10 @@ impl RengraveApp {
                 let can_calc = self.issues.is_empty();
                 if ui
                     .add_enabled(can_calc, egui::Button::new("Calculate"))
-                    .on_hover_text("Calculate V-carve paths now (F5)")
+                    .on_hover_text("Reload the source file and calculate V-carve paths now (F5)")
                     .clicked()
                 {
-                    self.recalculate(true);
+                    self.reload_and_recalculate();
                 }
             });
         }
@@ -211,6 +211,13 @@ impl RengraveApp {
             ui.label(name);
             if ui.button("Open…").clicked() {
                 self.open_image_dialog();
+            }
+            if ui
+                .button("Reload")
+                .on_hover_text("Read the file again, after changing it elsewhere (F5)")
+                .clicked()
+            {
+                self.reload_and_recalculate();
             }
         });
         ui.weak("DXF, PNG, BMP, PBM, JPEG, GIF, or TIFF. You can also drop a file on the window.");

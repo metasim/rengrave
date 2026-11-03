@@ -136,6 +136,17 @@ fn bad_input_fails_with_a_message() {
 }
 
 #[test]
+fn non_finite_values_are_rejected() {
+    for args in [["--z-safe", "nan"], ["--height", "inf"]] {
+        let mut full = vec!["gcode", "-t", "A", "--mode", "v-carve"];
+        full.extend_from_slice(&args);
+        let out = rengrave(&full);
+        assert!(!out.status.success(), "{args:?}");
+        assert!(String::from_utf8_lossy(&out.stderr).starts_with("error:"));
+    }
+}
+
+#[test]
 fn missing_characters_warn_on_stderr() {
     let out = rengrave(&["gcode", "-f", &fixture("tiny.cxf"), "-t", "AZ"]);
     assert!(out.status.success());

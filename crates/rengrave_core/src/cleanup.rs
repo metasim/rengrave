@@ -309,8 +309,6 @@ impl CleanupPaths {
             return Ok(Self { points: out });
         }
 
-        // Loop numbers for raster passes are reserved before concentric loops are added, so the
-        // passes are computed into their own buffers first.
         let raster = Raster {
             edges: &edges,
             extent,
