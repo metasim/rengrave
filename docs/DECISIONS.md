@@ -94,8 +94,8 @@ canceling is immediate.
 ## D10. Defaults
 
 `Settings::default()` keeps the original's defaults (engraving, inches), except for what D13 changes
-for FluidNC, so settings files and the command line behave as existing users expect. The desktop application starts on a one-inch V-carve,
-because V-carving is the program's main purpose. Settings persist between sessions.
+for FluidNC, so settings files and the command line behave as existing users expect. The desktop application starts on a 25.4 mm V-carve in
+millimeters, because V-carving is the program's main purpose. Settings persist between sessions.
 
 ## D11. Features not ported
 

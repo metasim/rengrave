@@ -170,13 +170,16 @@ pub struct RengraveApp {
 impl RengraveApp {
     /// The settings of a new job.
     fn default_settings() -> Settings {
-        Settings {
+        let mut settings = Settings {
             cut_type: CutType::VCarve,
             text: "rengrave".into(),
             y_scale: 1.0,
             v_step_len: 0.01,
             ..Settings::default()
-        }
+        };
+        // Set in inches, then converted: a one-inch design in millimeters.
+        settings.set_units(Units::Millimeters);
+        settings
     }
 
     /// Starts over with the default settings, discarding the current job.

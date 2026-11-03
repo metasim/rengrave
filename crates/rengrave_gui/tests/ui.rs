@@ -69,6 +69,8 @@ fn harness_with(settings: impl FnOnce(&mut Settings)) -> (Harness<'static, Rengr
     let dialogs = Box::new(answers.clone());
     let mut slot = Some(RengraveApp::new(egui::Context::default(), dialogs));
     if let Some(app) = slot.as_mut() {
+        // Most tests were written for inches, which also keeps the step small.
+        app.settings.set_units(Units::Inches);
         // Keep calculations small so that tests stay quick.
         app.settings.text = "Ab".into();
         app.settings.v_step_len = 0.03;
@@ -340,8 +342,9 @@ fn new_resets_the_settings_to_the_defaults() {
     // The harness starts from its own settings, so these are the application's defaults.
     let settings = &harness.state().settings;
     assert_eq!(settings.text, "rengrave");
-    assert_eq!(settings.feed, 5.0);
-    assert_eq!(settings.v_step_len, 0.01);
+    assert_eq!(settings.units, Units::Millimeters);
+    assert_eq!(settings.feed, 127.0);
+    assert_eq!(settings.y_scale, 25.4);
 }
 
 #[test]
