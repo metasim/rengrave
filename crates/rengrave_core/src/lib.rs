@@ -9,8 +9,8 @@
 //! 1. Load the source glyphs: [`Job::load`] reads the font or image named by the [`Settings`].
 //! 2. Position the outlines: [`Job::layout`] produces a [`Design`].
 //! 3. Calculate depths, if V-carving: [`CarvePath::calculate`].
-//! 4. Write the result: [`GcodeProgram::generate`], [`export::write_svg`], or
-//!    [`export::write_dxf`]. [`CleanupPaths`] and [`GcodeProgram::generate_cleanup`] produce the
+//! 4. Write the result: [`GcodeProgram::generate`], [`Design::to_svg`], or
+//!    [`Design::to_dxf`]. [`CleanupPaths`] and [`GcodeProgram::generate_cleanup`] produce the
 //!    optional secondary operations.
 //!
 //! [`Job::generate_gcode`] runs stages 2 through 4 in one call:
@@ -35,7 +35,7 @@ pub mod cleanup;
 pub mod design;
 pub mod dxf;
 mod error;
-pub mod export;
+mod export;
 pub mod font;
 pub mod gcode;
 pub mod geom;

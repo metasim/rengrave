@@ -8,7 +8,7 @@ use crate::design::Design;
 use crate::error::Result;
 use crate::geom::{Point, Segment, ZERO};
 use crate::settings::{CleanupBit, CleanupOps, CutType, Settings};
-use crate::sort::{sort_for_v_carve, sort_paths};
+use crate::sort::PathRange;
 use crate::vcarve::CarvePoint;
 use clipper2_rust::{
     ClipperOffset, EndType, FillRule, JoinType, Path64, Paths64, Point64, difference_64,
@@ -200,7 +200,7 @@ impl Raster<'_> {
             }
         }
         *loop_cnt += 1;
-        let order = sort_paths(&passes, |p| (p.0, p.1), |p| p.2);
+        let order = PathRange::order_loops(&passes, |p| (p.0, p.1), |p| p.2);
         let (mut x_old, mut y_old) = (-999.0_f64, -999.0_f64);
         let mut loop_old = None;
         for range in order {
@@ -246,7 +246,7 @@ impl CleanupPaths {
         }
         let flop = settings.effective_flop(true);
         let offset_sign = if flop { -1.0 } else { 1.0 };
-        let clip = sort_for_v_carve(&design.segments, settings.accuracy);
+        let clip = Segment::sort_into_loops(&design.segments, settings.accuracy);
         if clip.is_empty() {
             return Ok(Self::default());
         }

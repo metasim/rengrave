@@ -1,0 +1,67 @@
+//! Renders the documentation screenshots. Needs a GPU, so it only runs with the `screenshots`
+//! feature: `cargo test -p rengrave_gui --features screenshots --test screenshots`.
+//!
+//! Images are written to the directory named by `RENGRAVE_SCREENSHOT_DIR`, or `docs/images`.
+#![cfg(feature = "screenshots")]
+
+use egui_kittest::Harness;
+use rengrave_core::{CutType, Justify};
+use rengrave_gui::{ActiveView, NativeDialogs, RengraveApp, Tab};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+fn settle(harness: &mut Harness<'_, RengraveApp>) {
+    let start = Instant::now();
+    while !harness.state().is_idle() {
+        harness.step();
+        assert!(start.elapsed() < Duration::from_secs(120));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    harness.run_steps(3);
+}
+
+fn save(harness: &mut Harness<'_, RengraveApp>, name: &str) {
+    let dir = std::env::var_os("RENGRAVE_SCREENSHOT_DIR").map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/images"),
+        PathBuf::from,
+    );
+    std::fs::create_dir_all(&dir).unwrap();
+    let image = harness.render().expect("rendering needs a GPU");
+    image.save(dir.join(name)).unwrap();
+}
+
+fn shoot(dark: bool, suffix: &str) {
+    let mut app = RengraveApp::new(egui::Context::default(), Box::new(NativeDialogs));
+    app.settings.text = "Rengrave\nV-Carve".into();
+    app.settings.justify = Justify::Center;
+    app.settings.cut_type = CutType::VCarve;
+    app.settings.y_scale = 1.0;
+    app.settings.v_step_len = 0.005;
+    let theme = if dark {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1180.0, 760.0))
+        .with_theme(theme)
+        .wgpu()
+        .build_ui_state(|ui, app: &mut RengraveApp| app.show(ui), app);
+    settle(&mut harness);
+    save(&mut harness, &format!("design{suffix}.png"));
+
+    harness.state_mut().tab = Tab::Toolpath;
+    harness.run_steps(3);
+    save(&mut harness, &format!("toolpath{suffix}.png"));
+
+    harness.state_mut().tab = Tab::Output;
+    harness.state_mut().active_view = ActiveView::Gcode;
+    harness.run_steps(3);
+    save(&mut harness, &format!("output{suffix}.png"));
+}
+
+#[test]
+fn render_screenshots() {
+    shoot(true, "");
+    shoot(false, "_light");
+}

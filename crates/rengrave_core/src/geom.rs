@@ -28,6 +28,33 @@ impl Point {
     pub fn distance(self, other: Self) -> f64 {
         ((self.x - other.x).powi(2) + (self.y - other.y).powi(2)).sqrt()
     }
+
+    /// Returns `true` if this point lies inside the closed polygon `poly`, by the even-odd rule.
+    ///
+    /// The closing edge from the last vertex back to the first is implied.
+    pub fn is_inside(self, poly: &[Self]) -> bool {
+        let Self { x, y } = self;
+        let n = poly.len();
+        if n == 0 {
+            return false;
+        }
+        let mut inside = false;
+        let mut p1 = poly[0];
+        let mut xinters = 0.0;
+        for i in 0..=n {
+            let p2 = poly[i % n];
+            if y > p1.y.min(p2.y) && y <= p1.y.max(p2.y) && x <= p1.x.max(p2.x) {
+                if p1.y != p2.y {
+                    xinters = (y - p1.y) * (p2.x - p1.x) / (p2.y - p1.y) + p1.x;
+                }
+                if p1.x == p2.x || x <= xinters {
+                    inside = !inside;
+                }
+            }
+            p1 = p2;
+        }
+        inside
+    }
 }
 
 /// Converts a sine/cosine pair to an angle in degrees, in the range `0..=360`.
@@ -128,32 +155,6 @@ impl Segment {
     }
 }
 
-/// Returns `true` if `(x, y)` lies inside the closed polygon `poly`, by the even-odd rule.
-///
-/// The closing edge from the last vertex back to the first is implied.
-pub fn point_in_polygon(x: f64, y: f64, poly: &[Point]) -> bool {
-    let n = poly.len();
-    if n == 0 {
-        return false;
-    }
-    let mut inside = false;
-    let mut p1 = poly[0];
-    let mut xinters = 0.0;
-    for i in 0..=n {
-        let p2 = poly[i % n];
-        if y > p1.y.min(p2.y) && y <= p1.y.max(p2.y) && x <= p1.x.max(p2.x) {
-            if p1.y != p2.y {
-                xinters = (y - p1.y) * (p2.x - p1.x) / (p2.y - p1.y) + p1.x;
-            }
-            if p1.x == p2.x || x <= xinters {
-                inside = !inside;
-            }
-        }
-        p1 = p2;
-    }
-    inside
-}
-
 /// Rounds `value` to `digits` significant digits, as `printf("%.{digits}g")` would.
 pub fn round_significant(value: f64, digits: i32) -> f64 {
     if value == 0.0 || !value.is_finite() {
@@ -210,10 +211,10 @@ mod tests {
             Point::new(2.0, 2.0),
             Point::new(0.0, 2.0),
         ];
-        assert!(point_in_polygon(1.0, 1.0, &square));
-        assert!(!point_in_polygon(3.0, 1.0, &square));
-        assert!(!point_in_polygon(-1.0, 1.0, &square));
-        assert!(!point_in_polygon(1.0, 3.0, &square));
+        assert!(Point::new(1.0, 1.0).is_inside(&square));
+        assert!(!Point::new(3.0, 1.0).is_inside(&square));
+        assert!(!Point::new(-1.0, 1.0).is_inside(&square));
+        assert!(!Point::new(1.0, 3.0).is_inside(&square));
     }
 
     #[test]
@@ -228,9 +229,9 @@ mod tests {
             Point::new(1.0, 3.0),
             Point::new(0.0, 3.0),
         ];
-        assert!(point_in_polygon(0.5, 2.0, &u));
-        assert!(!point_in_polygon(1.5, 2.0, &u));
-        assert!(point_in_polygon(1.5, 0.5, &u));
+        assert!(Point::new(0.5, 2.0).is_inside(&u));
+        assert!(!Point::new(1.5, 2.0).is_inside(&u));
+        assert!(Point::new(1.5, 0.5).is_inside(&u));
     }
 
     #[test]

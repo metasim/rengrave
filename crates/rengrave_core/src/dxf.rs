@@ -142,59 +142,61 @@ struct Reader {
     polyline: Option<OpenPolyline>,
 }
 
-/// Parses DXF text, flattening curves to within `tol_deg` degrees.
-pub fn read_dxf(text: &str, tol_deg: f64) -> Result<DxfDrawing> {
-    let groups = read_groups(text);
-    let mut blocks: BTreeMap<String, Block> = BTreeMap::new();
-    let mut entities: Vec<Entity> = Vec::new();
-    let mut saw_section = false;
+impl DxfDrawing {
+    /// Parses DXF text, flattening curves to within `tol_deg` degrees.
+    pub fn parse(text: &str, tol_deg: f64) -> Result<Self> {
+        let groups = read_groups(text);
+        let mut blocks: BTreeMap<String, Block> = BTreeMap::new();
+        let mut entities: Vec<Entity> = Vec::new();
+        let mut saw_section = false;
 
-    let mut i = 0;
-    while i < groups.len() {
-        let (code, value) = &groups[i];
-        i += 1;
-        if *code != 0 || !matches!(value, Value::Text(t) if t == "SECTION") {
-            continue;
-        }
-        saw_section = true;
-        let name = match groups.get(i) {
-            Some((2, Value::Text(n))) => {
-                i += 1;
-                n.as_str()
-            }
-            _ => "",
-        };
-        let start = i;
-        while i < groups.len()
-            && !(groups[i].0 == 0 && matches!(&groups[i].1, Value::Text(t) if t == "ENDSEC"))
-        {
+        let mut i = 0;
+        while i < groups.len() {
+            let (code, value) = &groups[i];
             i += 1;
+            if *code != 0 || !matches!(value, Value::Text(t) if t == "SECTION") {
+                continue;
+            }
+            saw_section = true;
+            let name = match groups.get(i) {
+                Some((2, Value::Text(n))) => {
+                    i += 1;
+                    n.as_str()
+                }
+                _ => "",
+            };
+            let start = i;
+            while i < groups.len()
+                && !(groups[i].0 == 0 && matches!(&groups[i].1, Value::Text(t) if t == "ENDSEC"))
+            {
+                i += 1;
+            }
+            let section = &groups[start..i];
+            i += 1;
+            match name {
+                "BLOCKS" => parse_blocks(section, &mut blocks),
+                "ENTITIES" => entities = parse_entities(section),
+                _ => {}
+            }
         }
-        let section = &groups[start..i];
-        i += 1;
-        match name {
-            "BLOCKS" => parse_blocks(section, &mut blocks),
-            "ENTITIES" => entities = parse_entities(section),
-            _ => {}
+        if !saw_section {
+            return Err(Error::Import("no DXF sections found".into()));
         }
-    }
-    if !saw_section {
-        return Err(Error::Import("no DXF sections found".into()));
-    }
 
-    let mut reader = Reader {
-        blocks,
-        tol_deg: tol_deg.max(0.01),
-        out: DxfDrawing::default(),
-        polyline: None,
-    };
-    for entity in &entities {
-        // A damaged entity should not lose the rest of the drawing.
-        if reader.eval(entity, Placement::IDENTITY, 0).is_err() {
-            reader.out.ignored.insert(entity.kind.clone());
+        let mut reader = Reader {
+            blocks,
+            tol_deg: tol_deg.max(0.01),
+            out: DxfDrawing::default(),
+            polyline: None,
+        };
+        for entity in &entities {
+            // A damaged entity should not lose the rest of the drawing.
+            if reader.eval(entity, Placement::IDENTITY, 0).is_err() {
+                reader.out.ignored.insert(entity.kind.clone());
+            }
         }
+        Ok(reader.out)
     }
-    Ok(reader.out)
 }
 
 /// Splits the file into (group code, value) pairs, skipping anything unreadable.
@@ -690,7 +692,7 @@ mod tests {
 
     #[test]
     fn reads_line() {
-        let d = read_dxf(
+        let d = DxfDrawing::parse(
             &dxf("0\nLINE\n8\nlayer\n10\n1.5\n20\n2\n30\n0\n11\n3\n21\n4\n31\n0\n"),
             5.0,
         )
@@ -701,17 +703,17 @@ mod tests {
     #[test]
     fn tolerates_crlf_and_indented_codes() {
         let text = dxf("  0\r\nLINE\r\n 10\r\n1\r\n 20\r\n2\r\n 11\r\n3\r\n 21\r\n4\r\n");
-        assert_eq!(read_dxf(&text, 5.0).unwrap().strokes.len(), 1);
+        assert_eq!(DxfDrawing::parse(&text, 5.0).unwrap().strokes.len(), 1);
     }
 
     #[test]
     fn non_dxf_text_is_an_error() {
-        assert!(read_dxf("hello\nworld\n", 5.0).is_err());
+        assert!(DxfDrawing::parse("hello\nworld\n", 5.0).is_err());
     }
 
     #[test]
     fn unknown_and_damaged_entities_do_not_lose_the_rest() {
-        let d = read_dxf(
+        let d = DxfDrawing::parse(
             &dxf(
                 "0\nMTEXT\n1\nhi\n0\nLINE\n10\n1\n0\nLINE\n10\n0\n20\n0\n11\n1\n21\n1\n0\nHATCH\n",
             ),
@@ -726,7 +728,8 @@ mod tests {
 
     #[test]
     fn arc_stays_on_circle_and_wraps() {
-        let d = read_dxf(&dxf("0\nARC\n10\n1\n20\n1\n40\n2\n50\n270\n51\n90\n"), 10.0).unwrap();
+        let d = DxfDrawing::parse(&dxf("0\nARC\n10\n1\n20\n1\n40\n2\n50\n270\n51\n90\n"), 10.0)
+            .unwrap();
         assert_eq!(d.strokes.len(), 18);
         assert_chained(&d.strokes);
         for s in &d.strokes {
@@ -738,7 +741,7 @@ mod tests {
     #[test]
     fn circle_closes_for_any_tolerance() {
         for tol in [5.0, 7.0, 11.0] {
-            let d = read_dxf(&dxf("0\nCIRCLE\n10\n0\n20\n0\n40\n3\n"), tol).unwrap();
+            let d = DxfDrawing::parse(&dxf("0\nCIRCLE\n10\n0\n20\n0\n40\n3\n"), tol).unwrap();
             let (first, last) = (d.strokes[0], *d.strokes.last().unwrap());
             assert_abs_diff_eq!(first.x1, last.x2, epsilon = 1e-9);
             assert_abs_diff_eq!(first.y1, last.y2, epsilon = 1e-9);
@@ -749,9 +752,10 @@ mod tests {
     #[test]
     fn lwpolyline_closed_and_open() {
         let verts = "10\n0\n20\n0\n10\n1\n20\n0\n10\n1\n20\n1\n";
-        let open = read_dxf(&dxf(&format!("0\nLWPOLYLINE\n70\n0\n{verts}")), 5.0).unwrap();
+        let open = DxfDrawing::parse(&dxf(&format!("0\nLWPOLYLINE\n70\n0\n{verts}")), 5.0).unwrap();
         assert_eq!(open.strokes.len(), 2);
-        let closed = read_dxf(&dxf(&format!("0\nLWPOLYLINE\n70\n1\n{verts}")), 5.0).unwrap();
+        let closed =
+            DxfDrawing::parse(&dxf(&format!("0\nLWPOLYLINE\n70\n1\n{verts}")), 5.0).unwrap();
         assert_eq!(closed.strokes.len(), 3);
         assert_eq!(closed.strokes[2], Stroke::new(1.0, 1.0, 0.0, 0.0));
     }
@@ -759,7 +763,7 @@ mod tests {
     #[test]
     fn lwpolyline_bulge_is_a_semicircle() {
         // Bulge 1 between (0,0) and (2,0) is a semicircle of radius 1 below the chord.
-        let d = read_dxf(
+        let d = DxfDrawing::parse(
             &dxf("0\nLWPOLYLINE\n70\n0\n10\n0\n20\n0\n42\n1\n10\n2\n20\n0\n"),
             10.0,
         )
@@ -778,7 +782,7 @@ mod tests {
     #[test]
     fn lwpolyline_bulges_align_with_their_vertices() {
         // First vertex has no bulge, second does.
-        let d = read_dxf(
+        let d = DxfDrawing::parse(
             &dxf("0\nLWPOLYLINE\n70\n0\n10\n0\n20\n0\n10\n2\n20\n0\n42\n-1\n10\n4\n20\n0\n"),
             30.0,
         )
@@ -790,7 +794,7 @@ mod tests {
 
     #[test]
     fn polyline_with_vertices() {
-        let d = read_dxf(
+        let d = DxfDrawing::parse(
             &dxf("0\nPOLYLINE\n70\n1\n0\nVERTEX\n10\n0\n20\n0\n0\nVERTEX\n10\n1\n20\n0\n0\nVERTEX\n10\n1\n20\n1\n0\nSEQEND\n"),
             5.0,
         )
@@ -801,14 +805,14 @@ mod tests {
 
     #[test]
     fn stray_vertex_is_ignored() {
-        let d = read_dxf(&dxf("0\nVERTEX\n10\n0\n20\n0\n"), 5.0).unwrap();
+        let d = DxfDrawing::parse(&dxf("0\nVERTEX\n10\n0\n20\n0\n"), 5.0).unwrap();
         assert!(d.strokes.is_empty());
         assert!(d.ignored.contains("VERTEX"));
     }
 
     #[test]
     fn ellipse_points_satisfy_equation() {
-        let d = read_dxf(
+        let d = DxfDrawing::parse(
             &dxf("0\nELLIPSE\n10\n1\n20\n2\n11\n4\n21\n0\n40\n0.5\n41\n0\n42\n6.283185307179586\n"),
             5.0,
         )
@@ -825,7 +829,7 @@ mod tests {
 
     #[test]
     fn leader_and_solid() {
-        let d = read_dxf(
+        let d = DxfDrawing::parse(
             &dxf("0\nLEADER\n10\n0\n20\n0\n10\n1\n20\n1\n0\nSOLID\n10\n0\n20\n0\n11\n1\n21\n0\n12\n0\n22\n1\n13\n1\n23\n1\n"),
             5.0,
         )
@@ -836,14 +840,14 @@ mod tests {
     #[test]
     fn insert_places_block_contents() {
         let text = "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nB1\n10\n1\n20\n1\n0\nLINE\n10\n1\n20\n1\n11\n2\n21\n1\n0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nINSERT\n2\nB1\n10\n5\n20\n5\n0\nENDSEC\n0\nEOF\n";
-        let d = read_dxf(text, 5.0).unwrap();
+        let d = DxfDrawing::parse(text, 5.0).unwrap();
         assert_eq!(d.strokes, [Stroke::new(5.0, 5.0, 6.0, 5.0)]);
     }
 
     #[test]
     fn insert_scale_and_rotation() {
         let text = "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nB\n10\n0\n20\n0\n0\nLINE\n10\n0\n20\n0\n11\n1\n21\n0\n0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nINSERT\n2\nB\n10\n0\n20\n0\n41\n2\n42\n2\n50\n90\n0\nENDSEC\n0\nEOF\n";
-        let s = read_dxf(text, 5.0).unwrap().strokes[0];
+        let s = DxfDrawing::parse(text, 5.0).unwrap().strokes[0];
         assert_abs_diff_eq!(s.x2, 0.0, epsilon = 1e-9);
         assert_abs_diff_eq!(s.y2, 2.0, epsilon = 1e-9);
     }
@@ -851,14 +855,14 @@ mod tests {
     #[test]
     fn recursive_insert_terminates() {
         let text = "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nB\n10\n0\n20\n0\n0\nINSERT\n2\nB\n10\n0\n20\n0\n0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nINSERT\n2\nB\n10\n0\n20\n0\n0\nENDSEC\n0\nEOF\n";
-        let d = read_dxf(text, 5.0).unwrap();
+        let d = DxfDrawing::parse(text, 5.0).unwrap();
         assert!(d.strokes.is_empty());
         assert!(d.ignored.contains("INSERT"));
     }
 
     #[test]
     fn missing_block_is_ignored() {
-        let d = read_dxf(&dxf("0\nINSERT\n2\nNOPE\n10\n0\n20\n0\n"), 5.0).unwrap();
+        let d = DxfDrawing::parse(&dxf("0\nINSERT\n2\nNOPE\n10\n0\n20\n0\n"), 5.0).unwrap();
         assert!(d.ignored.contains("INSERT"));
     }
 
@@ -912,7 +916,7 @@ mod tests {
 
     #[test]
     fn spline_entity_is_flattened() {
-        let d = read_dxf(
+        let d = DxfDrawing::parse(
             &dxf("0\nSPLINE\n70\n8\n71\n2\n40\n0\n40\n0\n40\n0\n40\n1\n40\n1\n40\n1\n10\n0\n20\n0\n10\n1\n20\n2\n10\n2\n20\n0\n"),
             5.0,
         )

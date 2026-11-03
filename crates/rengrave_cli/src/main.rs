@@ -1,8 +1,7 @@
 //! Command-line front end for `rengrave_core`: generates G-code, SVG, and DXF from text or images.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use rengrave_core::export::{write_dxf, write_svg};
-use rengrave_core::font::{BuiltinFont, Font, list_font_files};
+use rengrave_core::font::{BuiltinFont, Font};
 use rengrave_core::{
     ArcFit, BitShape, CheckScope, CleanupBit, CutType, GcodeProgram, InputType, Job, Justify,
     Origin, Progress, Settings, Tracer, Units,
@@ -36,7 +35,7 @@ enum Command {
     Cleanup {
         /// Tool to generate the operation for.
         #[arg(long, value_enum, default_value = "straight")]
-        bit: CliCleanupBit,
+        tool: CliCleanupBit,
         #[command(flatten)]
         output: OutputArgs,
     },
@@ -439,7 +438,7 @@ impl JobArgs {
                     if percent == 100 {
                         eprintln!();
                     }
-                } else if percent % 10 == 0 {
+                } else if percent.is_multiple_of(10) {
                     eprintln!("calculating: {percent}%");
                 }
             }
@@ -484,9 +483,9 @@ fn run(cli: Cli) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
             write_output(out.output.as_deref(), &program)
         }
-        Command::Cleanup { bit, output } => {
+        Command::Cleanup { tool, output } => {
             let job = output.job.job()?;
-            let bit = match bit {
+            let bit = match tool {
                 CliCleanupBit::Straight => CleanupBit::Straight,
                 CliCleanupBit::VBit => CleanupBit::VBit,
             };
@@ -499,7 +498,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let job = out.job.job()?;
             warn_missing(&job);
             let design = job.layout().map_err(|e| e.to_string())?;
-            write_output(out.output.as_deref(), &write_svg(&design, &job.settings))
+            write_output(out.output.as_deref(), &design.to_svg(&job.settings))
         }
         Command::Dxf {
             close_loops,
@@ -510,7 +509,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let design = job.layout().map_err(|e| e.to_string())?;
             write_output(
                 output.output.as_deref(),
-                &write_dxf(&design, &job.settings, close_loops),
+                &design.to_dxf(&job.settings, close_loops),
             )
         }
         Command::Settings(out) => {
@@ -526,7 +525,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 describe_font(&format!("(built-in) {}", builtin.name()), &font);
             }
             if let Some(dir) = dir {
-                for path in list_font_files(&dir).map_err(|e| e.to_string())? {
+                for path in Font::list_files(&dir).map_err(|e| e.to_string())? {
                     match Font::load_file(&path, 5.0, false) {
                         Ok(font) => describe_font(&path.display().to_string(), &font),
                         Err(e) => eprintln!("warning: {e}"),
