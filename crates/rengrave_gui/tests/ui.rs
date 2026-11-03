@@ -806,6 +806,47 @@ fn gcode_view_shows_program_text() {
     assert!(copied);
 }
 
+#[test]
+fn gcode_view_highlights_syntax_and_keeps_the_text() {
+    let (mut harness, _) = harness_with(|s| s.no_comments = false);
+    // Only visible rows are laid out, so make room for the settings block and the moves.
+    harness.set_size(egui::vec2(1200.0, 3000.0));
+    click(&mut harness, "G-code");
+    harness.run_steps(2);
+
+    // The accessible text is unchanged, so highlighting does not affect screen readers.
+    assert!(harness.query_by_label("G90").is_some());
+
+    let colors_of = |needle: &str| -> Vec<egui::Color32> {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.job.text.starts_with(needle) => Some(
+                    text.galley
+                        .job
+                        .sections
+                        .iter()
+                        .map(|s| s.format.color)
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no line starting with {needle}"))
+    };
+    let mut rapid = colors_of("G0 Z");
+    rapid.dedup();
+    assert!(
+        rapid.len() >= 2,
+        "the code and its operands differ: {rapid:?}"
+    );
+
+    let comment = colors_of("( Code generated");
+    assert_eq!(comment.len(), 1, "a comment is a single span");
+    assert_ne!(comment[0], rapid[0]);
+}
+
 // ---- Preview ----------------------------------------------------------------------------------
 
 #[test]

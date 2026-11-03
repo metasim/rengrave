@@ -1,6 +1,7 @@
 //! Application state and the top-level window layout.
 
 use crate::dialogs::{FileDialogs, FileKind};
+use crate::gcode_view::Token;
 use crate::preview::{Preview, Scene};
 use crate::worker::{Update, Worker};
 use egui::{CentralPanel, Key, KeyboardShortcut, Modifiers, Panel, RichText, Ui};
@@ -997,13 +998,17 @@ impl RengraveApp {
         match self.gcode() {
             Ok(lines) => {
                 let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+                let font = egui::TextStyle::Monospace.resolve(ui.style());
+                let dark = ui.visuals().dark_mode;
+                let plain = ui.visuals().text_color();
                 egui::ScrollArea::both().auto_shrink(false).show_rows(
                     ui,
                     row_height,
                     lines.len(),
                     |ui, range| {
                         for line in &lines[range] {
-                            ui.add(egui::Label::new(RichText::new(line).monospace()).extend());
+                            let job = Token::highlight(line, &font, dark, plain);
+                            ui.add(egui::Label::new(job).extend());
                         }
                     },
                 );

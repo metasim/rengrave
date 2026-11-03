@@ -29,7 +29,7 @@ A user of the program works through four questions, in order:
 | 10 | The canvas zooms with a left-drag, and with a wheel only where it arrives as X11 buttons 4 and 5. There is no fit command. | Zooming differs across platforms, and getting back to the whole design is awkward. | Scroll or pinch zooms about the pointer, drag pans, and double-click or **Fit** returns. A labeled grid shows scale, and the status bar shows the coordinates under the pointer. |
 | 11 | Preview layer options are in the View menu. | Checking the area against the path takes several clicks. | **Area**, **Path**, and **Grid** toggles sit above the preview. The complete list remains in the View menu. |
 | 12 | Fonts are listed from one directory, with a separate dialog to change it. | The program does nothing until fonts are installed. | Built-in fonts work immediately, the list has a filter, and any file can be dropped on the window. |
-| 13 | G-code can only be seen after saving it or copying it elsewhere. | Checking the output takes a round trip through another program. | A **G-code** view next to the preview shows the program, updated with the settings. |
+| 13 | G-code can only be seen after saving it or copying it elsewhere. | Checking the output takes a round trip through another program. | A **G-code** view next to the preview shows the program with syntax highlighting, updated with the settings. Rapid moves, cutting moves, and depths are told apart at a glance. |
 | 14 | The light-gray Tk layout has a fixed size for many controls. | It scales poorly and does not follow system themes. | The panel is resizable, the preview fills the window, and light and dark themes are both supported. |
 
 ## What stays the same

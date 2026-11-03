@@ -462,20 +462,42 @@ impl Preview {
         shapes
     }
 
-    /// Draws one polyline per loop.
-    fn path_lines(points: &[CarvePoint], t: &ViewTransform, stroke: Stroke, out: &mut Vec<Shape>) {
+    /// Converts tool positions to screen polylines, one or more per loop.
+    fn polylines(points: &[CarvePoint], t: &ViewTransform) -> Vec<Vec<Pos2>> {
+        // The tessellator divides by a near-zero length at a reversal or at repeated points, which
+        // produces stray or NaN vertices. V-carve paths reverse at every corner they drive into,
+        // so merge points on the same spot and split lines at corners sharper than a right angle.
+        const MIN_SEGMENT_PX: f32 = 0.1;
+        let mut lines: Vec<Vec<Pos2>> = Vec::new();
         let mut line: Vec<Pos2> = Vec::new();
         let mut last_loop = None;
         for p in points {
-            if last_loop != Some(p.loop_num) && !line.is_empty() {
-                out.push(Shape::line(std::mem::take(&mut line), stroke));
+            let pos = t.to_screen(p.x, p.y);
+            if last_loop != Some(p.loop_num) {
+                lines.push(std::mem::take(&mut line));
+                last_loop = Some(p.loop_num);
             }
-            line.push(t.to_screen(p.x, p.y));
-            last_loop = Some(p.loop_num);
+            match line[..] {
+                [.., last] if (pos - last).length() < MIN_SEGMENT_PX => continue,
+                [.., before, last] if (last - before).dot(pos - last) <= 0.0 => {
+                    lines.push(std::mem::replace(&mut line, vec![last]));
+                }
+                _ => {}
+            }
+            line.push(pos);
         }
-        if !line.is_empty() {
-            out.push(Shape::line(line, stroke));
-        }
+        lines.push(line);
+        lines.retain(|l| l.len() >= 2);
+        lines
+    }
+
+    /// Draws the path of a tool.
+    fn path_lines(points: &[CarvePoint], t: &ViewTransform, stroke: Stroke, out: &mut Vec<Shape>) {
+        out.extend(
+            Self::polylines(points, t)
+                .into_iter()
+                .map(|line| Shape::line(line, stroke)),
+        );
     }
 
     /// Builds one mesh containing a filled disc per tool position, skipping those that barely
@@ -530,6 +552,150 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tessellates `shapes` as the renderer would, returning how far any vertex strays outside
+    /// `allowed`. A NaN vertex counts as infinitely far.
+    fn worst_stray(shapes: Vec<Shape>, allowed: Rect) -> f32 {
+        let mut tessellator = egui::epaint::Tessellator::new(
+            1.0,
+            egui::epaint::TessellationOptions::default(),
+            [1, 1],
+            Vec::new(),
+        );
+        let mut worst = 0.0_f32;
+        for shape in shapes {
+            let mut mesh = Mesh::default();
+            tessellator.tessellate_shape(shape, &mut mesh);
+            for v in &mesh.vertices {
+                if v.pos.any_nan() {
+                    return f32::INFINITY;
+                }
+                let dx = (allowed.left() - v.pos.x)
+                    .max(v.pos.x - allowed.right())
+                    .max(0.0);
+                let dy = (allowed.top() - v.pos.y)
+                    .max(v.pos.y - allowed.bottom())
+                    .max(0.0);
+                worst = worst.max(dx.max(dy));
+            }
+        }
+        worst
+    }
+
+    fn unit_view() -> ViewTransform {
+        ViewTransform {
+            scale: 1.0,
+            center: (0.0, 0.0),
+            origin: pos2(0.0, 0.0),
+        }
+    }
+
+    fn at(list: &[(f64, f64, usize)]) -> Vec<CarvePoint> {
+        list.iter()
+            .map(|&(x, y, loop_num)| CarvePoint {
+                x,
+                y,
+                r: 0.0,
+                loop_num,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn polylines_split_at_reversals_and_sharp_corners() {
+        let reversal = at(&[(0.0, 0.0, 1), (10.0, 10.0, 1), (0.0, 0.0, 1)]);
+        assert_eq!(Preview::polylines(&reversal, &unit_view()).len(), 2);
+        let sharp = at(&[(0.0, 0.0, 1), (10.0, 0.0, 1), (0.0, 1.0, 1)]);
+        assert_eq!(Preview::polylines(&sharp, &unit_view()).len(), 2);
+        // The line continues from the corner, leaving no gap.
+        let lines = Preview::polylines(&sharp, &unit_view());
+        assert_eq!(lines[0].last(), lines[1].first());
+        let gentle = at(&[(0.0, 0.0, 1), (10.0, 0.0, 1), (20.0, 5.0, 1)]);
+        assert_eq!(Preview::polylines(&gentle, &unit_view()).len(), 1);
+    }
+
+    #[test]
+    fn polylines_merge_repeated_points_and_drop_single_points() {
+        let repeats = at(&[
+            (0.0, 0.0, 1),
+            (5.0, 0.0, 1),
+            (5.0, 0.0, 1),
+            (5.0, 0.0, 1),
+            (9.0, 0.0, 1),
+        ]);
+        let lines = Preview::polylines(&repeats, &unit_view());
+        assert_eq!(
+            lines,
+            [vec![pos2(0.0, 0.0), pos2(5.0, 0.0), pos2(9.0, 0.0)]]
+        );
+        assert!(Preview::polylines(&at(&[(1.0, 1.0, 1), (1.0, 1.0, 1)]), &unit_view()).is_empty());
+        assert!(Preview::polylines(&[], &unit_view()).is_empty());
+    }
+
+    #[test]
+    fn polylines_keep_loops_separate() {
+        let loops = at(&[(0.0, 0.0, 1), (5.0, 0.0, 1), (9.0, 9.0, 2), (9.0, 20.0, 2)]);
+        assert_eq!(Preview::polylines(&loops, &unit_view()).len(), 2);
+    }
+
+    #[test]
+    fn degenerate_paths_tessellate_without_stray_vertices() {
+        // A diagonal reversal and triplicated points, at scales that exercise float rounding.
+        for scale in [0.37_f32, 1.0, 3.3, 41.7] {
+            let t = ViewTransform {
+                scale,
+                ..unit_view()
+            };
+            let points = at(&[
+                (1.1, 2.3, 1),
+                (7.7, 8.9, 1),
+                (7.7, 8.9, 1),
+                (7.7, 8.9, 1),
+                (1.1, 2.3, 1),
+                (3.0, 2.3, 1),
+            ]);
+            let mut shapes = Vec::new();
+            Preview::path_lines(&points, &t, Stroke::new(1.0, Color32::WHITE), &mut shapes);
+            let extent = Rect::from_two_pos(t.to_screen(1.1, 2.3), t.to_screen(7.7, 8.9));
+            let stray = worst_stray(shapes, extent);
+            assert!(stray < 4.0, "strays {stray} px at scale {scale}");
+        }
+    }
+
+    #[test]
+    fn tool_paths_of_real_glyphs_draw_within_their_extent() {
+        use rengrave_core::{BuiltinFont, InputType, Job, Progress, Units};
+        let settings = Settings {
+            input_type: InputType::Text,
+            cut_type: CutType::VCarve,
+            font_file: BuiltinFont::Hack.name().into(),
+            extended_chars: true,
+            show_font_index: true,
+            ..Settings::with_units(Units::Millimeters)
+        };
+        let job = Job::load(Settings {
+            y_scale: 25.4,
+            v_step_len: 0.254,
+            ..settings
+        })
+        .unwrap();
+        let (design, carve) = job.calculate(&Progress::none()).unwrap();
+        let carve = carve.unwrap();
+        let canvas = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 900.0));
+        let t = ViewTransform::fit(&design.bounds, canvas);
+        let mut shapes = Vec::new();
+        Preview::path_lines(
+            &carve.points,
+            &t,
+            Stroke::new(1.0, Color32::WHITE),
+            &mut shapes,
+        );
+        let b = design.bounds;
+        let allowed =
+            Rect::from_two_pos(t.to_screen(b.min_x, b.min_y), t.to_screen(b.max_x, b.max_y));
+        let stray = worst_stray(shapes, allowed);
+        assert!(stray < 8.0, "a vertex strays {stray} px outside the design");
+    }
 
     #[test]
     fn transform_round_trips_and_flips_y() {
