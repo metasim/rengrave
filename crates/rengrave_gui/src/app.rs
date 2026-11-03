@@ -15,7 +15,7 @@ use egui::{CentralPanel, Key, KeyboardShortcut, Modifiers, Panel, RichText, Ui};
 use rengrave_core::font::{Font, extension_upper};
 use rengrave_core::{
     CarvePath, CarvePoint, CleanupBit, CleanupOps, CutType, Design, GcodeProgram, InputType, Issue,
-    Settings, Units,
+    Justify, Settings, Units,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -172,7 +172,8 @@ impl RengraveApp {
     fn default_settings() -> Settings {
         let mut settings = Settings {
             cut_type: CutType::VCarve,
-            text: "rengrave".into(),
+            text: "F-engrave\nFan!".into(),
+            justify: Justify::Center,
             y_scale: 1.0,
             v_step_len: 0.01,
             ..Settings::default()

@@ -341,7 +341,8 @@ fn new_resets_the_settings_to_the_defaults() {
     harness.run_steps(3);
     // The harness starts from its own settings, so these are the application's defaults.
     let settings = &harness.state().settings;
-    assert_eq!(settings.text, "rengrave");
+    assert_eq!(settings.text, "F-engrave\nFan!");
+    assert_eq!(settings.justify, Justify::Center);
     assert_eq!(settings.units, Units::Millimeters);
     assert_eq!(settings.feed, 127.0);
     assert_eq!(settings.y_scale, 25.4);
