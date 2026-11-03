@@ -1,0 +1,20 @@
+[package]
+name = "rengrave_cli"
+description = "Command-line front end for the rengrave G-code generator."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "README.md"
+
+[[bin]]
+name = "rengrave"
+path = "src/main.rs"
+
+[dependencies]
+rengrave_core.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

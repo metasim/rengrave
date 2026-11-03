@@ -1,0 +1,33 @@
+# Licensing for files that cannot carry a comment. See COPYRIGHT.md for an explanation.
+version = 1
+
+[[annotations]]
+path = "vendor/**"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Jonah Hawk"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "crates/rengrave_core/tests/parity/*.ngc"
+SPDX-FileCopyrightText = "2011-2026 Scorch"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = ["crates/rengrave_core/tests/parity/*.cfg", "crates/rengrave_core/tests/parity/*.text", "crates/rengrave_core/tests/parity/tiny.cxf", "crates/rengrave_core/tests/parity/drawing.dxf", "tools/parity/cases.txt", "tools/parity/README.md"]
+SPDX-FileCopyrightText = "2026 Simeon H.K. Fitch"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = ["crates/rengrave_gui/assets/fonts/Lato-Regular.ttf", "crates/rengrave_gui/assets/fonts/Lato-Bold.ttf", "crates/rengrave_gui/assets/fonts/Lato-OFL.txt"]
+SPDX-FileCopyrightText = ["2011-2015 tyPoland Lukasz Dziedzic (with Reserved Font Name \"Lato\")", "2010-2014 tyPoland Lukasz Dziedzic (as stated in Lato-OFL.txt)"]
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/rengrave_gui/assets/fonts/Lucide.ttf", "crates/rengrave_gui/assets/fonts/Lucide-LICENSE.txt"]
+SPDX-FileCopyrightText = ["2026 Lucide Icons and Contributors", "2013-present Cole Bemis"]
+SPDX-License-Identifier = "ISC AND MIT"
+
+[[annotations]]
+path = ["*.md", "docs/**", "crates/*/README.md", "**/Cargo.toml", "Cargo.lock", ".gitignore", "REUSE.toml"]
+SPDX-FileCopyrightText = "2026 Simeon H.K. Fitch"
+SPDX-License-Identifier = "GPL-3.0-or-later"
