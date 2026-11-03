@@ -190,6 +190,47 @@ fn survives_narrow_and_tiny_windows() {
 }
 
 #[test]
+fn tabs_are_exposed_as_tabs_and_report_the_selected_one() {
+    use egui::accesskit::Role;
+    let (mut harness, _) = harness();
+    for name in [
+        "Design", "Toolpath", "Output", "Preview", "Simulate", "G-code",
+    ] {
+        assert!(
+            harness.query_by_role_and_label(Role::Tab, name).is_some(),
+            "{name}"
+        );
+    }
+    let is_selected = |h: &Harness<'_, RengraveApp>, name: &str| {
+        h.get_by_role_and_label(Role::Tab, name)
+            .accesskit_node()
+            .toggled()
+            == Some(egui::accesskit::Toggled::True)
+    };
+    assert!(is_selected(&harness, "Design"));
+    assert!(!is_selected(&harness, "Output"));
+    assert!(is_selected(&harness, "Preview"));
+
+    click(&mut harness, "Output");
+    click(&mut harness, "G-code");
+    assert!(!is_selected(&harness, "Design"));
+    assert!(is_selected(&harness, "Output"));
+    assert!(is_selected(&harness, "G-code"));
+    assert_eq!(harness.state().tab, Tab::Output);
+    assert_eq!(harness.state().active_view, ActiveView::Gcode);
+}
+
+#[test]
+fn tools_sit_below_the_tabs_inside_the_pane() {
+    let (harness, _) = harness();
+    let tabs = harness.get_by_label("Preview").rect();
+    let tool = harness.get_by_label("Grid").rect();
+    let canvas = harness.get_by_label("Design preview").rect();
+    assert!(tool.top() >= tabs.bottom(), "{tool:?} under {tabs:?}");
+    assert!(canvas.top() >= tool.bottom(), "{canvas:?} under {tool:?}");
+}
+
+#[test]
 fn panel_layout_is_stable_across_frames() {
     let (mut harness, _) = harness();
     let first = harness.get_by_label("Design preview").rect();

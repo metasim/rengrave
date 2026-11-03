@@ -30,12 +30,13 @@ impl Palette {
         if dark {
             Self {
                 background: Color32::from_gray(32),
-                extent: Color32::from_gray(44),
+                // Translucent, so the grid shows through, with a slight warmth like stock.
+                extent: Color32::from_rgba_unmultiplied(170, 120, 70, 36),
                 grid: Color32::from_gray(50),
                 grid_major: Color32::from_gray(66),
                 label: Color32::from_gray(150),
                 outline: Color32::from_gray(235),
-                carve_area: Color32::from_rgb(40, 96, 150),
+                carve_area: crate::style::BLUE_DARK_THEME,
                 carve_path: Color32::from_rgb(255, 214, 102),
                 clean_straight: Color32::from_rgb(168, 112, 66),
                 clean_v: Color32::from_rgb(250, 150, 90),
@@ -45,12 +46,12 @@ impl Palette {
         } else {
             Self {
                 background: Color32::from_gray(246),
-                extent: Color32::WHITE,
+                extent: Color32::from_rgba_unmultiplied(190, 130, 70, 40),
                 grid: Color32::from_gray(232),
                 grid_major: Color32::from_gray(212),
                 label: Color32::from_gray(100),
                 outline: Color32::from_gray(25),
-                carve_area: Color32::from_rgb(150, 190, 230),
+                carve_area: crate::style::BLUE_LIGHT_THEME,
                 carve_path: Color32::from_rgb(180, 40, 40),
                 clean_straight: Color32::from_rgb(170, 120, 80),
                 clean_v: Color32::from_rgb(220, 110, 40),
@@ -737,6 +738,16 @@ mod tests {
             Rect::from_two_pos(t.to_screen(b.min_x, b.min_y), t.to_screen(b.max_x, b.max_y));
         let stray = worst_stray(shapes, allowed);
         assert!(stray < 8.0, "a vertex strays {stray} px outside the design");
+    }
+
+    #[test]
+    fn stock_area_lets_the_grid_show_through_and_is_warm() {
+        for dark in [true, false] {
+            let extent = Palette::for_mode(dark).extent;
+            assert!(extent.a() > 0 && extent.a() < 128, "{extent:?}");
+            let [r, g, b, _] = extent.to_srgba_unmultiplied();
+            assert!(r > g && g > b, "{extent:?}");
+        }
     }
 
     #[test]

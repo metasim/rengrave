@@ -102,6 +102,10 @@ pub trait UiExt {
     /// Wraps a row of options in one bordered, rounded frame.
     fn option_group(&mut self, add: impl FnOnce(&mut Ui));
 
+    /// A row of tabs that connects to the pane drawn below it. Each choice is a value, a name, and
+    /// a tooltip. A line runs across the available width, open beneath the selected tab.
+    fn tab_bar<T: Copy + PartialEq>(&mut self, value: &mut T, choices: &[(T, &str, &str)]);
+
     /// Text for a label that names a control, in the accent color.
     fn control_label(&self, text: impl Into<String>) -> RichText;
 
@@ -140,7 +144,118 @@ pub trait UiExt {
     fn resettable_text(&mut self, name: &str, tip: &str, value: &mut String, default: &str);
 }
 
+/// The geometry of one tab.
+struct TabShape;
+
+impl TabShape {
+    const PADDING: egui::Vec2 = egui::vec2(12.0, 5.0);
+    const RADIUS: f32 = 6.0;
+    const CORNER_STEPS: u32 = 4;
+
+    /// The tab's outline, up one side, around the top, and down the other, open at the bottom.
+    fn outline(rect: egui::Rect) -> Vec<egui::Pos2> {
+        let r = Self::RADIUS.min(rect.width() / 2.0).min(rect.height());
+        let quarter = std::f32::consts::FRAC_PI_2;
+        let mut points = vec![rect.left_bottom()];
+        let corners = [
+            (rect.left() + r, 2.0 * quarter),
+            (rect.right() - r, 3.0 * quarter),
+        ];
+        for (center_x, start) in corners {
+            for step in 0..=Self::CORNER_STEPS {
+                let angle = start + quarter * step as f32 / Self::CORNER_STEPS as f32;
+                let (sin, cos) = angle.sin_cos();
+                points.push(pos2(center_x + r * cos, rect.top() + r + r * sin));
+            }
+        }
+        points.push(rect.right_bottom());
+        points
+    }
+}
+
 impl UiExt for Ui {
+    fn tab_bar<T: Copy + PartialEq>(&mut self, value: &mut T, choices: &[(T, &str, &str)]) {
+        let row = self.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let mut tabs = Vec::with_capacity(choices.len());
+            for &(choice, name, tip) in choices {
+                let galley = egui::WidgetText::from(name).into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Button,
+                );
+                let size = galley.size() + 2.0 * TabShape::PADDING;
+                let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+                let selected = *value == choice;
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::Role::Tab, true, selected, name)
+                });
+                let response = response.on_hover_text(tip);
+                if response.clicked() {
+                    *value = choice;
+                }
+                tabs.push((rect, response, galley, *value == choice));
+            }
+            tabs
+        });
+        let tabs = row.inner;
+        let visuals = self.visuals().clone();
+        let line = visuals.widgets.noninteractive.bg_stroke;
+        let panel = visuals.panel_fill;
+        let painter = self.painter().clone();
+        let clip = self.clip_rect();
+        let bottom = row.response.rect.bottom().floor() + 0.5;
+
+        // Inactive tabs first, so that the line runs across their feet.
+        for (rect, response, galley, selected) in &tabs {
+            let (x_min, x_max) = (rect.left().floor() + 0.5, rect.right().floor() + 0.5);
+            let shape = egui::Rect::from_min_max(
+                pos2(x_min, rect.top().floor() + 0.5),
+                pos2(x_max, bottom),
+            );
+            let radius = TabShape::RADIUS as u8;
+            let rounding = egui::CornerRadius {
+                nw: radius,
+                ne: radius,
+                sw: 0,
+                se: 0,
+            };
+            let (fill, text) = if *selected {
+                (panel, visuals.hyperlink_color)
+            } else if response.hovered() {
+                (
+                    visuals.widgets.hovered.weak_bg_fill,
+                    visuals.strong_text_color(),
+                )
+            } else {
+                (visuals.faint_bg_color, visuals.text_color())
+            };
+            painter.rect_filled(shape, rounding, fill);
+            let outline = if response.has_focus() {
+                Stroke::new(1.0, visuals.hyperlink_color)
+            } else {
+                line
+            };
+            painter.add(egui::Shape::line(TabShape::outline(shape), outline));
+            painter.galley(rect.min + TabShape::PADDING, galley.clone(), text);
+        }
+        let gap = tabs
+            .iter()
+            .find(|(.., selected)| *selected)
+            .map(|(rect, ..)| (rect.left().floor() + 0.5, rect.right().floor() + 0.5));
+        let (left, right) = (clip.left(), clip.right());
+        match gap {
+            Some((a, b)) => {
+                painter.line_segment([pos2(left, bottom), pos2(a, bottom)], line);
+                painter.line_segment([pos2(b, bottom), pos2(right, bottom)], line);
+            }
+            None => {
+                painter.line_segment([pos2(left, bottom), pos2(right, bottom)], line);
+            }
+        }
+    }
+
     fn compact<R>(&mut self, add: impl FnOnce(&mut Ui) -> R) -> R {
         self.scope(|ui| {
             Look::compact_control_style(ui.style_mut());
@@ -398,5 +513,42 @@ impl UiExt for Ui {
             .min_col_width(118.0)
             .spacing([8.0, 4.0])
             .show(self, add);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_outline_is_open_at_the_bottom_and_rounded_at_the_top() {
+        let rect = egui::Rect::from_min_max(pos2(10.0, 20.0), pos2(90.0, 50.0));
+        let points = TabShape::outline(rect);
+        assert_eq!(points[0], rect.left_bottom());
+        assert_eq!(points[points.len() - 1], rect.right_bottom());
+        // Nothing crosses the bottom edge, so the tab stays open to its pane.
+        assert!(
+            points[1..points.len() - 1]
+                .iter()
+                .all(|p| p.y < rect.bottom())
+        );
+        assert!(points.iter().all(|p| rect.expand(0.01).contains(*p)));
+        // The square corners themselves are cut off.
+        assert!(points.iter().all(|p| (*p - rect.left_top()).length() > 1.0));
+        assert!(
+            points
+                .iter()
+                .all(|p| (*p - rect.right_top()).length() > 1.0)
+        );
+    }
+
+    #[test]
+    fn tab_outline_handles_tabs_narrower_than_its_corners() {
+        let rect = egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(4.0, 2.0));
+        assert!(
+            TabShape::outline(rect)
+                .iter()
+                .all(|p| p.x.is_finite() && p.y.is_finite())
+        );
     }
 }

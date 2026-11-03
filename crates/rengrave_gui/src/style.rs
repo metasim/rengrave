@@ -21,6 +21,11 @@ const RADIUS: u8 = 6;
 /// Corner radius of compact controls.
 const COMPACT_RADIUS: u8 = 2;
 
+/// The blue of the carved area in the preview, and of selected controls, in the dark theme.
+pub(crate) const BLUE_DARK_THEME: Color32 = Color32::from_rgb(40, 96, 150);
+/// The blue of the carved area in the preview, and of selected controls, in the light theme.
+pub(crate) const BLUE_LIGHT_THEME: Color32 = Color32::from_rgb(150, 190, 230);
+
 /// Colors for one theme.
 struct Palette {
     dark: bool,
@@ -35,13 +40,16 @@ struct Palette {
     code: Color32,
     text: Color32,
     selection_fill: Color32,
+    /// Text and icons on `selection_fill`.
+    selection_text: Color32,
 }
 
 impl Palette {
     fn dark() -> Self {
         Self {
             dark: true,
-            accent: Color32::from_rgb(0x55, 0xBB, 0xB7),
+            // The fill's blue is too dim to read as text here, so text uses a tint of it.
+            accent: Color32::from_rgb(125, 180, 235),
             alert: Color32::from_rgb(0xFF, 0x66, 0x00),
             panel: Color32::from_gray(24),
             window: Color32::from_gray(30),
@@ -49,14 +57,16 @@ impl Palette {
             extreme: Color32::from_gray(16),
             code: Color32::from_gray(20),
             text: Color32::from_gray(215),
-            selection_fill: Color32::from_rgb(0x17, 0x4F, 0x4D),
+            selection_fill: BLUE_DARK_THEME,
+            selection_text: Color32::from_rgb(235, 244, 255),
         }
     }
 
     fn light() -> Self {
         Self {
             dark: false,
-            accent: Color32::from_rgb(0x2F, 0x67, 0x65),
+            // The dark theme's fill is dark enough to read as text on light panels.
+            accent: BLUE_DARK_THEME,
             alert: Color32::from_rgb(0xB3, 0x47, 0x00),
             panel: Color32::from_gray(246),
             window: Color32::WHITE,
@@ -64,7 +74,8 @@ impl Palette {
             extreme: Color32::WHITE,
             code: Color32::from_gray(240),
             text: Color32::from_gray(25),
-            selection_fill: Color32::from_rgb(0xD5, 0xEE, 0xED),
+            selection_fill: BLUE_LIGHT_THEME,
+            selection_text: Color32::from_rgb(15, 40, 75),
         }
     }
 
@@ -121,7 +132,7 @@ impl Palette {
         w.open.bg_fill = self.selection_fill;
         w.open.weak_bg_fill = self.selection_fill;
         w.open.bg_stroke = Stroke::new(1.0, self.accent);
-        w.open.fg_stroke = Stroke::new(1.0, self.accent);
+        w.open.fg_stroke = Stroke::new(1.0, self.selection_text);
 
         for widget in [
             &mut w.noninteractive,
@@ -136,7 +147,7 @@ impl Palette {
         }
 
         v.selection.bg_fill = self.selection_fill;
-        v.selection.stroke = Stroke::new(1.0, self.accent);
+        v.selection.stroke = Stroke::new(1.0, self.selection_text);
         v.hyperlink_color = self.accent;
         v.warn_fg_color = self.alert;
         v.error_fg_color = self.alert;
@@ -260,5 +271,45 @@ impl Look {
     pub fn menu_style(style: &mut Style) {
         egui::containers::menu::menu_style(style);
         style.spacing.button_padding = vec2(8.0, 6.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WCAG contrast ratio between two colors.
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let luminance = |c: Color32| {
+            let channel = |v: u8| {
+                let v = f32::from(v) / 255.0;
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(c.r()) + 0.7152 * channel(c.g()) + 0.0722 * channel(c.b())
+        };
+        let (x, y) = (luminance(a), luminance(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn text_stays_readable_in_both_themes() {
+        for palette in [Palette::dark(), Palette::light()] {
+            let on_panel = contrast(palette.accent, palette.panel);
+            assert!(on_panel >= 4.5, "accent on panel: {on_panel}");
+            let on_fill = contrast(palette.selection_text, palette.selection_fill);
+            assert!(on_fill >= 4.5, "text on selection: {on_fill}");
+            let body = contrast(palette.text, palette.panel);
+            assert!(body >= 4.5, "body text: {body}");
+        }
+    }
+
+    #[test]
+    fn selection_uses_the_carved_area_blue() {
+        assert_eq!(Palette::dark().selection_fill, BLUE_DARK_THEME);
+        assert_eq!(Palette::light().selection_fill, BLUE_LIGHT_THEME);
     }
 }
