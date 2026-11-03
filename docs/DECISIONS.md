@@ -68,8 +68,34 @@ clear defects, so the port deliberately does not reproduce them:
   measured if followed by a newline. All lines are measured in all modes.
 - Fonts: cubic curves were reduced to one chord, and CFF (`.otf`) winding was not normalized.
 - Python exceptions such as a zero-length chord in arc fitting are handled as "no arc".
-- Multiple adjacent identical settings keys parse by exact name, not substring match, so a value
-  for `v_bit_dia` cannot be captured by another key that happens to contain the same text.
+- Settings keys match by exact name rather than by substring, so one key cannot capture another's
+  value.
 
 The G-code comment header names rengrave instead of F-Engrave, and `gpre`/`gpost` values read
 from a settings file no longer gain a trailing space.
+
+## D9. Interface: a redesign rather than a copy
+
+The review in [UX_REVIEW.md](UX_REVIEW.md) led to one window with tabs in place of the original's
+modal dialogs, automatic recalculation in place of the Recalculate button, and a background
+calculation in place of the modal progress window. *Open question for the owner:* whether **Live
+V-carve** should default to on. It is on, because the engine is fast enough for typical designs and
+canceling is immediate.
+
+## D10. Defaults
+
+`Settings::default()` keeps the original's defaults (engraving, inches), so settings files and the
+command line behave as existing users expect. The desktop application starts on a one-inch V-carve,
+because V-carving is the program's main purpose. Settings persist between sessions.
+
+## D11. Features not ported
+
+- The `Plot During V-Carve Calculation` option, which is superseded by the live preview.
+- Running as a LinuxCNC AXIS filter (`Write to Axis`).
+- `(fengrave_set v_pplot ...)` is accepted but ignored.
+
+## D12. Repository state
+
+The repository had no remote or commits at the start, so there is no pull request. All work is on
+the branch `feature/rust-port`. The unborn `master` was never committed to, and the owner's default
+branch name, `main`, has not been created.

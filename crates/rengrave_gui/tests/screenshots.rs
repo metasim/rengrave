@@ -30,7 +30,8 @@ fn save(harness: &mut Harness<'_, RengraveApp>, name: &str) {
     image.save(dir.join(name)).unwrap();
 }
 
-fn shoot(dark: bool, suffix: &str) {
+/// Renders the design view, plus the other tabs when `all_tabs` is set.
+fn shoot(dark: bool, suffix: &str, all_tabs: bool) {
     let mut app = RengraveApp::new(egui::Context::default(), Box::new(NativeDialogs));
     app.settings.text = "Rengrave\nV-Carve".into();
     app.settings.justify = Justify::Center;
@@ -49,6 +50,9 @@ fn shoot(dark: bool, suffix: &str) {
         .build_ui_state(|ui, app: &mut RengraveApp| app.show(ui), app);
     settle(&mut harness);
     save(&mut harness, &format!("design{suffix}.png"));
+    if !all_tabs {
+        return;
+    }
 
     harness.state_mut().tab = Tab::Toolpath;
     harness.run_steps(3);
@@ -62,6 +66,6 @@ fn shoot(dark: bool, suffix: &str) {
 
 #[test]
 fn render_screenshots() {
-    shoot(true, "");
-    shoot(false, "_light");
+    shoot(true, "", true);
+    shoot(false, "_light", false);
 }
