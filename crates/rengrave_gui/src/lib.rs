@@ -11,9 +11,11 @@
 mod app;
 pub mod dialogs;
 mod gcode_view;
+mod icons;
 mod inspector;
 pub mod preview;
 pub mod simulator;
+mod style;
 mod widgets;
 pub mod worker;
 

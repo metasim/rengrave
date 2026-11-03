@@ -5,8 +5,11 @@
 
 use crate::dialogs::{FileDialogs, FileKind};
 use crate::gcode_view::Token;
+use crate::icons;
 use crate::preview::{Preview, Scene};
 use crate::simulator::SimulatorView;
+use crate::style::Look;
+use crate::widgets::UiExt;
 use crate::worker::{Update, Worker};
 use egui::{CentralPanel, Key, KeyboardShortcut, Modifiers, Panel, RichText, Ui};
 use rengrave_core::font::{Font, extension_upper};
@@ -154,6 +157,7 @@ pub struct RengraveApp {
 impl RengraveApp {
     /// Creates the application, using `dialogs` to ask for files.
     pub fn new(ctx: egui::Context, dialogs: Box<dyn FileDialogs>) -> Self {
+        Look::install(&ctx);
         let notify = ctx.clone();
         Self {
             ctx,
@@ -769,6 +773,7 @@ impl RengraveApp {
 
     /// Draws the whole application into `ui` and handles input for this frame.
     pub fn show(&mut self, ui: &mut Ui) {
+        Look::ensure_installed(ui.ctx());
         let now = ui.input(|i| i.time);
         self.update_state(now);
         self.handle_shortcuts(ui);
@@ -792,119 +797,150 @@ impl RengraveApp {
     }
 
     fn menu_bar(&mut self, ui: &mut Ui) {
-        egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("File", |ui| {
-                if ui
-                    .add(
-                        egui::Button::new("Open image or DXF…")
-                            .shortcut_text(ui.ctx().format_shortcut(&OPEN)),
-                    )
-                    .clicked()
-                {
-                    self.open_image_dialog();
-                    ui.close();
-                }
-                if ui.button("Open settings…").clicked() {
-                    self.open_settings_dialog();
-                    ui.close();
-                }
-                if ui.button("Save settings…").clicked() {
-                    self.save_settings();
-                    ui.close();
-                }
-                ui.separator();
-                if ui
-                    .add_enabled(
-                        self.can_write_gcode(),
-                        egui::Button::new("Save G-code…")
-                            .shortcut_text(ui.ctx().format_shortcut(&SAVE)),
-                    )
-                    .clicked()
-                {
-                    self.save_gcode();
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(
-                        self.has_cleanup(CleanupBit::Straight),
-                        egui::Button::new("Save straight cleanup G-code…"),
-                    )
-                    .clicked()
-                {
-                    self.save_cleanup(CleanupBit::Straight);
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(
-                        self.has_cleanup(CleanupBit::VBit),
-                        egui::Button::new("Save V-bit cleanup G-code…"),
-                    )
-                    .clicked()
-                {
-                    self.save_cleanup(CleanupBit::VBit);
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(
-                        self.can_write_gcode(),
-                        egui::Button::new("Copy G-code")
-                            .shortcut_text(ui.ctx().format_shortcut(&COPY_GCODE)),
-                    )
-                    .clicked()
-                {
-                    self.copy_gcode();
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Export SVG…").clicked() {
-                    self.save_svg();
-                    ui.close();
-                }
-                if ui.button("Export DXF…").clicked() {
-                    self.save_dxf(false);
-                    ui.close();
-                }
-                if ui.button("Export DXF with closed loops…").clicked() {
-                    self.save_dxf(true);
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Quit").clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                }
+        egui::MenuBar::new()
+            .style(Look::menu_style)
+            .config(egui::containers::menu::MenuConfig::new().style(Look::menu_style))
+            .ui(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui
+                        .menu_item(
+                            true,
+                            icons::OPEN,
+                            "Open image or DXF…",
+                            Some(ui.ctx().format_shortcut(&OPEN)),
+                        )
+                        .clicked()
+                    {
+                        self.open_image_dialog();
+                        ui.close();
+                    }
+                    if ui
+                        .menu_item(true, icons::OPEN, "Open settings…", None)
+                        .clicked()
+                    {
+                        self.open_settings_dialog();
+                        ui.close();
+                    }
+                    if ui
+                        .menu_item(true, icons::SETTINGS, "Save settings…", None)
+                        .clicked()
+                    {
+                        self.save_settings();
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui
+                        .menu_item(
+                            self.can_write_gcode(),
+                            icons::SAVE,
+                            "Save G-code…",
+                            Some(ui.ctx().format_shortcut(&SAVE)),
+                        )
+                        .clicked()
+                    {
+                        self.save_gcode();
+                        ui.close();
+                    }
+                    if ui
+                        .menu_item(
+                            self.has_cleanup(CleanupBit::Straight),
+                            icons::SAVE,
+                            "Save straight cleanup G-code…",
+                            None,
+                        )
+                        .clicked()
+                    {
+                        self.save_cleanup(CleanupBit::Straight);
+                        ui.close();
+                    }
+                    if ui
+                        .menu_item(
+                            self.has_cleanup(CleanupBit::VBit),
+                            icons::SAVE,
+                            "Save V-bit cleanup G-code…",
+                            None,
+                        )
+                        .clicked()
+                    {
+                        self.save_cleanup(CleanupBit::VBit);
+                        ui.close();
+                    }
+                    if ui
+                        .menu_item(
+                            self.can_write_gcode(),
+                            icons::COPY,
+                            "Copy G-code",
+                            Some(ui.ctx().format_shortcut(&COPY_GCODE)),
+                        )
+                        .clicked()
+                    {
+                        self.copy_gcode();
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui
+                        .menu_item(true, icons::EXPORT, "Export SVG…", None)
+                        .clicked()
+                    {
+                        self.save_svg();
+                        ui.close();
+                    }
+                    if ui
+                        .menu_item(true, icons::EXPORT, "Export DXF…", None)
+                        .clicked()
+                    {
+                        self.save_dxf(false);
+                        ui.close();
+                    }
+                    if ui
+                        .menu_item(true, icons::EXPORT, "Export DXF with closed loops…", None)
+                        .clicked()
+                    {
+                        self.save_dxf(true);
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.menu_item(true, icons::QUIT, "Quit", None).clicked() {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+                ui.menu_button("View", |ui| {
+                    if ui
+                        .menu_item(
+                            true,
+                            icons::FIT,
+                            "Fit design",
+                            Some(ui.ctx().format_shortcut(&FIT)),
+                        )
+                        .clicked()
+                    {
+                        self.preview.fit();
+                        ui.close();
+                    }
+                    ui.separator();
+                    ui.checkbox(&mut self.preview.layers.grid, "Grid");
+                    ui.checkbox(&mut self.settings.show_axis, "Origin axes");
+                    ui.checkbox(&mut self.settings.show_box, "Bounding box");
+                    ui.checkbox(&mut self.settings.show_thick, "Line thickness");
+                    ui.checkbox(&mut self.settings.show_v_area, "Carved area");
+                    ui.checkbox(&mut self.settings.show_v_path, "Tool path");
+                    ui.checkbox(&mut self.preview.layers.clean_straight, "Straight cleanup");
+                    ui.checkbox(&mut self.preview.layers.clean_v_bit, "V-bit cleanup");
+                });
+                ui.menu_button("Help", |ui| {
+                    if ui
+                        .menu_item(true, icons::INFO, "About rengrave", None)
+                        .clicked()
+                    {
+                        self.show_about = true;
+                        ui.close();
+                    }
+                    ui.hyperlink_to(
+                        "F-Engrave website",
+                        "https://www.scorchworks.com/Fengrave/fengrave.html",
+                    );
+                });
             });
-            ui.menu_button("View", |ui| {
-                if ui
-                    .add(
-                        egui::Button::new("Fit design")
-                            .shortcut_text(ui.ctx().format_shortcut(&FIT)),
-                    )
-                    .clicked()
-                {
-                    self.preview.fit();
-                    ui.close();
-                }
-                ui.separator();
-                ui.checkbox(&mut self.preview.layers.grid, "Grid");
-                ui.checkbox(&mut self.settings.show_axis, "Origin axes");
-                ui.checkbox(&mut self.settings.show_box, "Bounding box");
-                ui.checkbox(&mut self.settings.show_thick, "Line thickness");
-                ui.checkbox(&mut self.settings.show_v_area, "Carved area");
-                ui.checkbox(&mut self.settings.show_v_path, "Tool path");
-                ui.checkbox(&mut self.preview.layers.clean_straight, "Straight cleanup");
-                ui.checkbox(&mut self.preview.layers.clean_v_bit, "V-bit cleanup");
-            });
-            ui.menu_button("Help", |ui| {
-                if ui.button("About rengrave").clicked() {
-                    self.show_about = true;
-                    ui.close();
-                }
-                ui.hyperlink_to(
-                    "F-Engrave website",
-                    "https://www.scorchworks.com/Fengrave/fengrave.html",
-                );
-            });
-        });
     }
 
     fn status_bar(&mut self, ui: &mut Ui) {
@@ -926,14 +962,25 @@ impl RengraveApp {
                     self.cancel();
                 }
             }
+            match status.level {
+                StatusLevel::Warning => {
+                    ui.label(Look::icon(icons::WARNING).color(color));
+                }
+                StatusLevel::Error => {
+                    ui.label(Look::icon(icons::ERROR).color(color));
+                }
+                StatusLevel::Info | StatusLevel::Busy => {}
+            }
             ui.label(RichText::new(status.text).color(color));
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let mut units = self.settings.units;
-                for (choice, name) in [(Units::Millimeters, "mm"), (Units::Inches, "in")] {
-                    ui.selectable_value(&mut units, choice, name)
-                        .on_hover_text("Units for all lengths. Values convert automatically.");
-                }
+                ui.option_group(|ui| {
+                    for (choice, name) in [(Units::Millimeters, "mm"), (Units::Inches, "in")] {
+                        ui.selectable_value(&mut units, choice, name)
+                            .on_hover_text("Units for all lengths. Values convert automatically.");
+                    }
+                });
                 self.settings.set_units(units);
                 ui.separator();
                 if let Some((x, y)) = self.preview.hover_position
@@ -950,11 +997,17 @@ impl RengraveApp {
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(8, 4))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.active_view, ActiveView::Preview, "Preview");
-                    ui.selectable_value(&mut self.active_view, ActiveView::Simulator, "Simulate")
+                ui.horizontal_wrapped(|ui| {
+                    ui.option_group(|ui| {
+                        ui.selectable_value(&mut self.active_view, ActiveView::Preview, "Preview");
+                        ui.selectable_value(
+                            &mut self.active_view,
+                            ActiveView::Simulator,
+                            "Simulate",
+                        )
                         .on_hover_text("Play the G-code program and see what it cuts");
-                    ui.selectable_value(&mut self.active_view, ActiveView::Gcode, "G-code");
+                        ui.selectable_value(&mut self.active_view, ActiveView::Gcode, "G-code");
+                    });
                     ui.separator();
                     match self.active_view {
                         ActiveView::Preview => self.preview_toolbar(ui),
@@ -964,7 +1017,7 @@ impl RengraveApp {
                         }
                         ActiveView::Gcode => {
                             if ui
-                                .add_enabled(self.can_write_gcode(), egui::Button::new("Copy"))
+                                .icon_button(self.can_write_gcode(), icons::COPY, "Copy")
                                 .clicked()
                             {
                                 self.copy_gcode();
@@ -1015,7 +1068,7 @@ impl RengraveApp {
 
     fn fit_button(&mut self, ui: &mut Ui) {
         if ui
-            .add_enabled(!self.preview.is_fitted(), egui::Button::new("Fit"))
+            .icon_button(!self.preview.is_fitted(), icons::FIT, "Fit")
             .on_hover_text("Fit the design in the window (double-click the preview)")
             .clicked()
         {

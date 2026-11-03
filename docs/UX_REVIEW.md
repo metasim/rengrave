@@ -40,6 +40,15 @@ direction. It shares its pan and zoom with Preview, shows the current G-code lin
 moves that cut into the stock. Choosing the speed from the program's length keeps long jobs
 watchable.
 
+## Added after the review: Visual style
+
+The interface now uses gray chrome with turquoise reserved for focus (hover, selection, and the
+labels and headings that name controls), orange for warnings and errors, Lato for text, and Lucide
+icons beside the playback, fit, open, save, copy, and reset commands. Segmented choices and the
+tab rows share one bordered group, so a row of options reads as a single control. Warnings and
+errors now share a color, so the status bar adds an icon to tell them apart. See D16 in
+[DECISIONS.md](DECISIONS.md).
+
 ## What stays the same
 
 - The terminology of the original's manual (Finish stock, Step over, Drive to corner, and so on),

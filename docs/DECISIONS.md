@@ -177,3 +177,37 @@ it is independent in expression but not clean-room. Consider asking a lawyer if 
 how rengrave will be distributed. The earlier sources F-Engrave credits (cxf2cnc.py, DXF2GCODE,
 LinuxCNC's Author.py, and others) were taken on trust from its GPL-3.0-or-later distribution, and
 their licenses were not checked individually.
+
+## D16. Interface style: neutral chrome, turquoise focus, bundled fonts
+
+The owner asked for the desktop application to look closer to another of their programs. Only a
+written style specification was used; none of that program's code or assets was consulted.
+`crates/rengrave_gui/src/style.rs` installs the fonts and a `Visuals` for each theme when
+`RengraveApp::new` runs. It also runs from `show` for any context that has not been styled yet,
+because `egui_kittest` draws into a different context than the one given to `new`.
+
+- **Neutral chrome, brand color for focus only.** Panels and widgets are gray. Turquoise marks
+  links, hovered, active, and open widgets, selection, and control labels and section headings.
+  Dark mode uses `#55BBB7` and `#FF6600`; light mode uses darker `#2F6765` and `#B34700` for text
+  contrast.
+- **Fonts.** Lato Regular leads the proportional family, with egui's fonts behind it as fallbacks.
+  Lato Bold is its own family, because `strong()` changes color and not weight. Lucide is another
+  family, reached through `icons.rs`. Monospace stays Hack, and text sizes are egui's defaults.
+  The files add about 2.3 MB to the binary; Lucide is not subset.
+- **Fonts and licenses.** Lato 2.015 is under OFL-1.1, and Lucide (lucide-static 1.67.0) under ISC,
+  with MIT for icons Lucide took from Feather. Texts are in `LICENSES/` and beside the fonts, and
+  `COPYRIGHT.md` and `REUSE.toml` record them.
+- **Stable sizes.** `expansion` is 0 and widget strokes are always 1 pt, so only colors change on
+  hover and press.
+- **Helpers on `UiExt`:** `option_group` (a bordered frame around segmented options), `compact`
+  (4x1 padding, radius 2), `control_label`, `section_heading`, `icon_button`, and `menu_item`.
+  Buttons keep their plain text as the accessible name, so the glyph does not leak into it.
+- **Warnings and errors are now the same orange.** The status bar tells them apart with an icon (a
+  triangle or a circled cross), and the Busy state has the spinner. Beside a field the message and
+  its orange label are as before, so an invalid field is no longer distinguished from a warning by
+  hue alone. *Open question:* if that proves unclear, give errors a separate hue.
+- **Test helper.** The larger button padding pushes some settings below the visible part of the
+  scrolling panel in the 1200x900 test window, so the `click` helper in `tests/ui.rs` now scrolls
+  to a widget first. The assertions are unchanged.
+- **Simulate toolbar wraps** onto a second line when the window is narrow, because the padded
+  buttons no longer fit in 760 pixels.
