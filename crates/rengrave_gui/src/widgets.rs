@@ -115,6 +115,9 @@ pub trait UiExt {
     /// A button with an icon before its text. Its accessible name is the text alone.
     fn icon_button(&mut self, enabled: bool, icon: char, text: &str) -> Response;
 
+    /// A button that switches `value` on and off, and looks like a button in both states.
+    fn toggle_button(&mut self, value: &mut bool, text: &str) -> Response;
+
     /// A menu entry with an icon, and optionally the text of its keyboard shortcut.
     fn menu_item(
         &mut self,
@@ -290,6 +293,15 @@ impl UiExt for Ui {
 
     fn section_heading(&self, text: impl Into<String>) -> RichText {
         Look::bold(text).color(self.visuals().hyperlink_color)
+    }
+
+    fn toggle_button(&mut self, value: &mut bool, text: &str) -> Response {
+        let mut response = self.add(egui::Button::new(text).selected(*value));
+        if response.clicked() {
+            *value = !*value;
+            response.mark_changed();
+        }
+        response
     }
 
     fn icon_button(&mut self, enabled: bool, icon: char, text: &str) -> Response {
