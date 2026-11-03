@@ -9,7 +9,7 @@ authors.workspace = true
 readme = "README.md"
 
 [[bin]]
-name = "rengrave-gui"
+name = "rengrave"
 path = "src/main.rs"
 
 [lib]

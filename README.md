@@ -34,12 +34,12 @@ libraries](https://github.com/emilk/egui/tree/main/crates/eframe#usage).
 cargo build --release
 ```
 
-This produces two programs in `target/release`: `rengrave` and `rengrave-gui`.
+This produces two programs in `target/release`: `rengrave-cli` and `rengrave`.
 
 ### Desktop application
 
 ```bash
-cargo run --release --bin rengrave-gui
+cargo run --release --bin rengrave
 ```
 
 On macOS, build a `Rengrave.app` bundle with [cargo-bundle](https://github.com/burtonageo/cargo-bundle)
@@ -53,8 +53,8 @@ cd crates/rengrave_gui && cargo bundle --release
 The app is written to `target/release/bundle/osx/Rengrave.app`.
 
 The window shows the design, its carved area, and the tool path, recalculating after each change.
-Choose the text and font on the **Design** tab and the bit on the **Toolpath** tab, then press
-**Save G-code…**.
+Choose the text and font on the **Design** tab and the bit on the **Toolpath** tab, then choose
+**File ▸ Save G-code…**.
 
 | Action | Control |
 | --- | --- |
@@ -72,36 +72,36 @@ direction, or press **Finish** to see the result. Run times are estimates that i
 
 ![The Simulate tab, part way through carving](docs/images/simulator.png)
 
-A file path on the command line (`rengrave-gui job.ngc`) opens that settings file, font, or image.
+A file path on the command line (`rengrave job.ngc`) opens that settings file, font, or image.
 
 ### Command line
 
 V-carve some text with a built-in font, in millimeters:
 
 ```bash
-rengrave gcode --text "Hello" --mode v-carve --units mm --height 25 --bit-dia 12.7 --output hello.ngc
+rengrave-cli gcode --text "Hello" --mode v-carve --units mm --height 25 --bit-dia 12.7 --output hello.ngc
 ```
 
 V-carve a drawing, centered on the origin:
 
 ```bash
-rengrave gcode --image logo.dxf --mode v-carve --height 2 --origin mid-center --output logo.ngc
+rengrave-cli gcode --image logo.dxf --mode v-carve --height 2 --origin mid-center --output logo.ngc
 ```
 
 Use a font file, and two lines of centered text (`|` starts a new line):
 
 ```bash
-rengrave gcode --font /path/to/font.ttf --text "One|Two" --justify center --mode v-carve --output two.ngc
+rengrave-cli gcode --font /path/to/font.ttf --text "One|Two" --justify center --mode v-carve --output two.ngc
 ```
 
 Write the job's settings, then reuse them:
 
 ```bash
-rengrave settings --text "Hello" --mode v-carve --output job.cfg
+rengrave-cli settings --text "Hello" --mode v-carve --output job.cfg
 ```
 
 ```bash
-rengrave gcode --settings job.cfg --output hello.ngc
+rengrave-cli gcode --settings job.cfg --output hello.ngc
 ```
 
 The commands are:
@@ -115,7 +115,7 @@ The commands are:
 | `settings` | A settings file |
 | `fonts` | A list of built-in fonts, and of those in a directory |
 
-Output goes to standard output unless `--output` is given. `rengrave gcode --help` lists every
+Output goes to standard output unless `--output` is given. `rengrave-cli gcode --help` lists every
 option. Any setting without its own option can be set by its settings-file name, as in
 `--set v_stp_crner=210`.
 
@@ -134,7 +134,7 @@ option. Any setting without its own option can be set by its settings-file name,
 | --- | --- |
 | [`crates/rengrave_core`](crates/rengrave_core) | The toolpath engine, as a library |
 | [`crates/rengrave_cli`](crates/rengrave_cli) | The `rengrave` command |
-| [`crates/rengrave_gui`](crates/rengrave_gui) | The `rengrave-gui` application, built with [egui](https://www.egui.rs) |
+| [`crates/rengrave_gui`](crates/rengrave_gui) | The `rengrave` application, built with [egui](https://www.egui.rs) |
 | [`docs/PORTING.md`](docs/PORTING.md) | How the code maps to the original, and how it was verified |
 | [`docs/UX_REVIEW.md`](docs/UX_REVIEW.md) | The design review behind the application's interface |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Decisions made during the port, for review |

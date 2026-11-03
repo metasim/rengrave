@@ -4,7 +4,7 @@
 //! The rengrave desktop application, built with [egui](https://www.egui.rs).
 //!
 //! [`RengraveApp`] holds all application state and draws itself into any [`egui::Ui`], so it can
-//! run in a native window (`rengrave-gui`) or headless under `egui_kittest`.
+//! run in a native window (`rengrave`) or headless under `egui_kittest`.
 
 #![warn(missing_docs)]
 

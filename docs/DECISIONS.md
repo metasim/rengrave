@@ -13,7 +13,7 @@ without a clean-room rewrite.*
 ## D2. Crate layout and branch
 
 Three crates as suggested, under `crates/`: `rengrave_core`, `rengrave_cli` (binary
-`rengrave`), and `rengrave_gui` (binary `rengrave-gui`). The stub root package created by
+`rengrave-cli`), and `rengrave_gui` (binary `rengrave`). The stub root package created by
 `cargo new` was replaced by a virtual workspace. Work is on `feature/rust-port`; the
 repository had no commits, and no remote is configured, so no PR has been opened. The source
 archive `F-Engrave-1.78_src.zip` is ignored rather than committed, since it is reference
@@ -37,7 +37,7 @@ licensing mistake.
 
 The distribution ships no fonts, and without one the program cannot produce anything. The
 port embeds the Ubuntu Light and Hack typefaces through the `epaint_default_fonts` crate
-(already in the GUI's dependency tree) so that `rengrave gcode --text Hello` works with zero
+(already in the GUI's dependency tree) so that `rengrave-cli gcode --text Hello` works with zero
 setup. CXF stroke fonts and TTF/OTF files are loaded the same way as in the original.
 
 ## D6. Bitmap tracing: native tracer, with potrace optional
