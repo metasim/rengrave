@@ -117,7 +117,6 @@ pub struct RengraveApp {
     /// The most recent calculation request.
     generation: u64,
     requested: Option<Settings>,
-    carve_requested: bool,
     /// When the settings last differed from the request, in `egui` time.
     changed_at: Option<f64>,
     busy: bool,
@@ -125,17 +124,22 @@ pub struct RengraveApp {
 
     design: Option<Arc<Design>>,
     carve: Option<Arc<CarvePath>>,
-    carve_points: Option<Arc<Vec<CarvePoint>>>,
     clean_straight: Option<Arc<Vec<CarvePoint>>>,
     clean_v_bit: Option<Arc<Vec<CarvePoint>>>,
     /// The inputs of the visible cleanup paths.
     cleanup_inputs: Option<CleanupInputs>,
+    /// Identifies the latest cleanup request; older results are discarded.
+    cleanup_request: u64,
+    /// Changes whenever the results to draw change.
+    scene_revision: u64,
     gcode_cache: Option<GcodeCache>,
 
     error: Option<String>,
     warnings: Vec<String>,
     /// The latest message that is not derived from the job state.
     notice: Option<Status>,
+    /// Keep `notice` through the next recalculation, which it may itself have caused.
+    keep_notice: bool,
 }
 
 /// Returns a copy with fields that do not affect toolpaths cleared, for detecting real changes.
@@ -193,20 +197,21 @@ impl RengraveApp {
             show_about: false,
             generation: 0,
             requested: None,
-            carve_requested: false,
             changed_at: None,
             busy: false,
             cleanup_busy: false,
             design: None,
             carve: None,
-            carve_points: None,
             clean_straight: None,
             clean_v_bit: None,
             cleanup_inputs: None,
+            cleanup_request: 0,
+            scene_revision: 0,
             gcode_cache: None,
             error: None,
             warnings: Vec::new(),
             notice: None,
+            keep_notice: false,
         }
     }
 
@@ -264,6 +269,7 @@ impl RengraveApp {
         self.issues.is_empty()
             && self.design.is_some()
             && (self.settings.cut_type != CutType::VCarve || self.carve.is_some())
+            && !self.busy
             && !self.settings_are_pending()
     }
 
@@ -351,8 +357,10 @@ impl RengraveApp {
 
     /// Discards results that no longer match the settings.
     fn clear_results(&mut self) {
+        self.scene_revision += 1;
+        self.cleanup_request += 1;
+        self.cleanup_busy = false;
         self.carve = None;
-        self.carve_points = None;
         self.clean_straight = None;
         self.clean_v_bit = None;
         self.gcode_cache = None;
@@ -360,17 +368,27 @@ impl RengraveApp {
 
     /// Starts a calculation now, including V-carve paths if `carve` is set.
     pub fn recalculate(&mut self, carve: bool) {
+        self.start_calculation(carve, false);
+    }
+
+    /// Reads the font or image again, in case the file changed, and calculates everything.
+    pub fn reload_and_recalculate(&mut self) {
+        self.start_calculation(true, true);
+    }
+
+    fn start_calculation(&mut self, carve: bool, reload: bool) {
         self.generation += 1;
         self.requested = Some(self.settings.clone());
-        self.carve_requested = carve;
         self.changed_at = None;
         self.busy = true;
         self.error = None;
-        self.notice = None;
+        if !std::mem::take(&mut self.keep_notice) {
+            self.notice = None;
+        }
         self.warnings.clear();
         self.clear_results();
         self.worker
-            .calculate(self.generation, self.settings.clone(), carve);
+            .calculate(self.generation, self.settings.clone(), carve, reload);
     }
 
     /// Stops the running calculation.
@@ -385,10 +403,16 @@ impl RengraveApp {
         };
         self.clean_straight = None;
         self.clean_v_bit = None;
+        self.scene_revision += 1;
         self.cleanup_inputs = Some(CleanupInputs::of(&self.settings));
         self.cleanup_busy = true;
-        self.worker
-            .cleanup(self.generation, self.settings.clone(), design);
+        self.cleanup_request += 1;
+        self.worker.cleanup(
+            self.generation,
+            self.cleanup_request,
+            self.settings.clone(),
+            design,
+        );
     }
 
     fn apply_update(&mut self, update: Update) {
@@ -407,22 +431,31 @@ impl RengraveApp {
             } => {
                 self.design = Some(design);
                 self.warnings = warnings;
+                self.gcode_cache = None;
+                self.scene_revision += 1;
             }
             Update::Carve { design, carve, .. } => {
-                self.carve_points = Some(Arc::new(carve.points.clone()));
                 self.carve = Some(carve);
                 self.design = Some(design);
                 self.gcode_cache = None;
+                self.scene_revision += 1;
             }
-            Update::Cleanup {
-                straight, v_bit, ..
-            } => {
-                self.clean_straight = Some(straight);
-                self.clean_v_bit = Some(v_bit);
+            Update::Cleanup { request, paths, .. } => {
+                if request != self.cleanup_request {
+                    return;
+                }
+                self.cleanup_busy = false;
+                match paths {
+                    Ok((straight, v_bit)) => {
+                        self.clean_straight = Some(straight);
+                        self.clean_v_bit = Some(v_bit);
+                        self.scene_revision += 1;
+                    }
+                    Err(error) => self.notify(StatusLevel::Error, error),
+                }
             }
             Update::Stopped { error, .. } => {
                 self.busy = false;
-                self.cleanup_busy = false;
                 if let Some(error) = error {
                     self.error = Some(error);
                     self.design = None;
@@ -444,6 +477,9 @@ impl RengraveApp {
             self.clean_straight = None;
             self.clean_v_bit = None;
             self.cleanup_inputs = None;
+            self.cleanup_request += 1;
+            self.cleanup_busy = false;
+            self.scene_revision += 1;
         }
         self.issues = self.settings.validate();
         if !self.issues.is_empty() {
@@ -630,6 +666,7 @@ impl RengraveApp {
             "NGC" | "NC" | "TAP" | "GCODE" | "TXT" | "CFG" => match std::fs::read_to_string(path) {
                 Ok(text) => {
                     let problems = self.settings.apply_settings_text(&text);
+                    self.keep_notice = true;
                     if let Some(first) = problems.first() {
                         self.notify(
                             StatusLevel::Warning,
@@ -726,7 +763,7 @@ impl RengraveApp {
             )
         });
         if f5 && self.issues.is_empty() {
-            self.recalculate(true);
+            self.reload_and_recalculate();
         }
         if esc {
             self.cancel();
@@ -946,14 +983,12 @@ impl RengraveApp {
             ActiveView::Preview => {
                 let scene = Scene {
                     design: self.design.clone(),
-                    carve: self.carve_points.clone(),
+                    carve: self.carve.clone(),
                     clean_straight: self.clean_straight.clone(),
                     clean_v_bit: self.clean_v_bit.clone(),
                 };
-                let key = self.generation
-                    ^ (u64::from(scene.carve.is_some()) << 62)
-                    ^ (u64::from(scene.clean_straight.is_some()) << 61);
-                self.preview.show(ui, &scene, &self.settings, key);
+                self.preview
+                    .show(ui, &scene, &self.settings, self.scene_revision);
             }
             ActiveView::Gcode => self.gcode_view(ui),
         }

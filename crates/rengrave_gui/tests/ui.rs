@@ -912,6 +912,143 @@ fn layer_toggles_are_available_and_work() {
 }
 
 #[test]
+fn preview_redraws_new_layout_in_a_panned_view() {
+    let (mut harness, _) = harness_with(|s| s.cut_type = CutType::Engrave);
+    // A custom view keeps the transform fixed, so only the content can change the drawing.
+    harness.state_mut().preview.zoom_by(1.1);
+    harness.run_steps(2);
+    let lines = |h: &Harness<'_, RengraveApp>| -> Vec<[egui::Pos2; 2]> {
+        h.output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::LineSegment { points, .. } => Some(*points),
+                _ => None,
+            })
+            .collect()
+    };
+    let before = lines(&harness);
+    harness.state_mut().settings.text = "bA".into();
+    harness.run_steps(1);
+    settle(&mut harness);
+    assert_ne!(lines(&harness), before, "the new text must be drawn");
+}
+
+#[test]
+fn gcode_is_unavailable_until_a_running_layout_finishes() {
+    let (mut harness, _) = harness_with(|s| s.cut_type = CutType::Engrave);
+    let old = harness.state_mut().gcode().unwrap();
+    harness.state_mut().settings.text = "Different".into();
+    harness.state_mut().recalculate(false);
+    assert!(!harness.state().can_write_gcode());
+    // Asking anyway must not leave the old program cached for the new design.
+    let _ = harness.state_mut().gcode();
+    settle(&mut harness);
+    assert!(harness.state().can_write_gcode());
+    assert_ne!(harness.state_mut().gcode().unwrap(), old);
+}
+
+#[test]
+fn f5_rereads_a_changed_source_file() {
+    let dir = temp_dir("reload");
+    let path = dir.join("d.dxf");
+    let line = |x: f64| {
+        format!(
+            "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n{x}\n21\n1\n0\nENDSEC\n0\nEOF\n"
+        )
+    };
+    std::fs::write(&path, line(1.0)).unwrap();
+    let (mut harness, _) = harness_with(|s| {
+        s.input_type = InputType::Image;
+        s.image_file = path.clone();
+        s.cut_type = CutType::Engrave;
+        s.stroke_thickness = 0.0;
+        s.y_scale = 1.0;
+    });
+    assert!((harness.state().design().unwrap().bounds.width() - 1.0).abs() < 1e-9);
+
+    std::fs::write(&path, line(3.0)).unwrap();
+    harness.key_press(Key::F5);
+    harness.run_steps(1);
+    settle(&mut harness);
+    assert!((harness.state().design().unwrap().bounds.width() - 3.0).abs() < 1e-9);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn cleanup_result_is_discarded_when_its_inputs_changed() {
+    let (mut harness, _) = harness_with(|s| {
+        s.text = "O".into();
+        s.y_scale = 3.0;
+        s.v_bit_dia = 0.05;
+        s.clean_dia = 0.01;
+        s.v_step_len = 0.05;
+    });
+    harness.state_mut().calculate_cleanup();
+    harness.state_mut().settings.clean_dia = 0.02;
+    settle(&mut harness);
+    // Give a late result time to arrive; it must be ignored.
+    std::thread::sleep(Duration::from_millis(200));
+    harness.run_steps(2);
+    assert!(
+        harness
+            .state()
+            .cleanup_paths(CleanupBit::Straight)
+            .is_none()
+    );
+}
+
+#[test]
+fn load_warnings_survive_the_recalculation_they_cause() {
+    let dir = temp_dir("load_warning");
+    let path = dir.join("job.ngc");
+    std::fs::write(
+        &path,
+        "(fengrave_set YSCALE 0.5 )\n(fengrave_set nonsense 1 )\n",
+    )
+    .unwrap();
+    let (mut harness, _) = harness();
+    harness.state_mut().open_path(&path);
+    harness.run_steps(1);
+    settle(&mut harness);
+    let status = harness.state().status();
+    assert_eq!(status.level, StatusLevel::Warning);
+    assert!(status.text.contains("Ignored 1"), "{}", status.text);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn hidden_settings_do_not_block_output() {
+    let (mut harness, _) = harness_with(|s| {
+        s.box_gap = 0.0;
+        s.clean_dia = 0.0;
+        s.cut_type = CutType::Engrave;
+    });
+    assert!(harness.state().can_write_gcode());
+    harness.state_mut().settings.cut_type = CutType::VCarve;
+    harness.run_steps(2);
+    assert_eq!(harness.state().status().level, StatusLevel::Error);
+    harness.state_mut().settings.clean_dia = 0.25;
+    harness.run_steps(1);
+    settle(&mut harness);
+    assert!(harness.state().can_write_gcode());
+}
+
+#[test]
+fn invalid_bit_angle_draws_and_blocks_output() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "Toolpath");
+    harness.get_by_label("Angle").set_value_accesskit(0.0);
+    harness.run_steps(3);
+    assert_eq!(harness.state().status().level, StatusLevel::Error);
+    assert!(!harness.state().can_write_gcode());
+    harness.get_by_label("Angle").set_value_accesskit(60.0);
+    harness.run_steps(2);
+    settle(&mut harness);
+    assert!(harness.state().can_write_gcode());
+}
+
+#[test]
 fn large_design_draws_without_panicking() {
     let (mut harness, _) = harness_with(|s| {
         s.text = "Lorem ipsum\ndolor sit amet".into();

@@ -296,8 +296,8 @@ fn cxf_key(header: &str) -> Option<u32> {
 
 fn parse_floats(text: &str) -> Vec<f64> {
     text.split(',')
-        .map(|t| t.trim().parse::<f64>())
-        .collect::<std::result::Result<_, _>>()
+        .map(|t| t.trim().parse::<f64>().ok().filter(|v| v.is_finite()))
+        .collect::<Option<_>>()
         .unwrap_or_default()
 }
 
@@ -465,6 +465,12 @@ mod tests {
         assert_eq!(font.glyph('B').unwrap().strokes.len(), 1);
         assert_eq!(font.glyph('C').unwrap().strokes.len(), 1);
         assert_eq!(font.glyphs.len(), 4, "invalid header must be dropped");
+    }
+
+    #[test]
+    fn cxf_skips_non_finite_coordinates() {
+        let font = Font::parse_cxf("[A]\nL 0,0,nan,1\nL 0,inf,1,1\nL 0,0,1,1\n", 5.0);
+        assert_eq!(font.glyph('A').unwrap().strokes.len(), 1);
     }
 
     #[test]

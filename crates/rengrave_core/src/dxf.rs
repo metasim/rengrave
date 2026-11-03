@@ -35,10 +35,16 @@ impl Value {
             0..=9 | 100 | 102 | 105 | 300..=368 | 999 | 1000..=1009 => {
                 Some(Self::Text(raw.to_string()))
             }
-            10..=59 | 140..=147 | 1010..=1059 => raw.parse().ok().map(Self::Number),
-            60..=79 | 90..=99 | 170..=175 | 280..=289 | 1060..=1071 => {
-                raw.parse::<f64>().ok().map(|v| Self::Number(v.trunc()))
-            }
+            10..=59 | 140..=147 | 1010..=1059 => raw
+                .parse()
+                .ok()
+                .filter(|v: &f64| v.is_finite())
+                .map(Self::Number),
+            60..=79 | 90..=99 | 170..=175 | 280..=289 | 1060..=1071 => raw
+                .parse::<f64>()
+                .ok()
+                .filter(|v| v.is_finite())
+                .map(|v| Self::Number(v.trunc())),
             _ => Some(Self::Absent),
         }
     }
@@ -204,11 +210,14 @@ fn read_groups(text: &str) -> Vec<(u32, Value)> {
     let mut groups = Vec::new();
     let mut lines = text.lines();
     while let Some(line) = lines.next() {
-        let Ok(code) = line.trim().parse::<u32>() else {
+        let Ok(code) = line.trim().parse::<i32>() else {
             continue;
         };
         let Some(raw) = lines.next() else { break };
-        if let Some(value) = Value::parse(code, raw.trim_matches([' ', '\r'])) {
+        // Negative codes are valid in DXF, and name application data that is not needed here.
+        if let Ok(code) = u32::try_from(code)
+            && let Some(value) = Value::parse(code, raw.trim_matches([' ', '\r']))
+        {
             groups.push((code, value));
         }
     }
@@ -263,21 +272,31 @@ fn parse_blocks(section: &[(u32, Value)], blocks: &mut BTreeMap<String, Block>) 
 
 fn parse_entities(section: &[(u32, Value)]) -> Vec<Entity> {
     let mut entities: Vec<Entity> = Vec::new();
-    let mut last_code = None;
+    // Whether the current polyline vertex exists and still lacks a bulge.
+    let mut vertex_lacks_bulge = false;
     for (code, value) in section {
         match (code, value) {
-            (0, Value::Text(kind)) => entities.push(Entity::new(kind)),
+            (0, Value::Text(kind)) => {
+                entities.push(Entity::new(kind));
+                vertex_lacks_bulge = false;
+            }
             _ => {
                 if let Some(entity) = entities.last_mut() {
-                    // Keep bulge values aligned with vertices that have none.
-                    if entity.kind == "LWPOLYLINE" && *code == 10 && last_code == Some(20) {
-                        entity.push(42, Value::Number(0.0));
+                    if entity.kind == "LWPOLYLINE" {
+                        // Keep bulge values aligned with vertices that have none.
+                        if *code == 10 {
+                            if vertex_lacks_bulge {
+                                entity.push(42, Value::Number(0.0));
+                            }
+                            vertex_lacks_bulge = true;
+                        } else if *code == 42 {
+                            vertex_lacks_bulge = false;
+                        }
                     }
                     entity.push(*code, value.clone());
                 }
             }
         }
-        last_code = Some(*code);
     }
     entities
 }
@@ -410,7 +429,7 @@ impl Reader {
         for (i, w) in points.windows(2).enumerate() {
             self.add_bulge(w[0], w[1], bulge_at(i), place);
         }
-        if e.number(70).unwrap_or(0.0) != 0.0
+        if (e.number(70).unwrap_or(0.0) as i64) & 1 != 0
             && let (Some(&first), Some(&last)) = (points.first(), points.last())
         {
             self.add_bulge(last, first, bulge_at(points.len() - 1), place);
@@ -562,8 +581,14 @@ impl Nurbs {
         }
         let kmin = knots.iter().copied().fold(f64::INFINITY, f64::min);
         let kmax = knots.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        if kmax <= kmin {
-            return Err(Error::Import("SPLINE has a degenerate knot vector".into()));
+        if kmax <= kmin || knots.windows(2).any(|w| w[1] < w[0]) {
+            return Err(Error::Import("SPLINE has an invalid knot vector".into()));
+        }
+        if knots[degree] >= knots[points.len()] {
+            return Err(Error::Import("SPLINE has an empty parameter range".into()));
+        }
+        if weights.len() < points.len() || weights.iter().any(|&w| w <= 0.0) {
+            return Err(Error::Import("SPLINE has invalid weights".into()));
         }
         for k in &mut knots {
             *k = (*k - kmin) / (kmax - kmin);
@@ -580,7 +605,12 @@ impl Nurbs {
         })
     }
 
-    /// Algorithm A2.1 from The NURBS Book.
+    /// The parameter range over which the curve is defined.
+    fn domain(&self) -> (f64, f64) {
+        (self.knots[self.degree], self.knots[self.control.len()])
+    }
+
+    /// Algorithm A2.1 from The NURBS Book. `u` must lie within [`Nurbs::domain`].
     fn find_span(&self, u: f64) -> usize {
         let n = self.control.len() - 1;
         if u >= self.knots[n + 1] {
@@ -603,6 +633,8 @@ impl Nurbs {
     /// Evaluates the curve at parameter `u`.
     fn eval(&self, u: f64) -> (f64, f64) {
         let p = self.degree;
+        let (start, end) = self.domain();
+        let u = u.clamp(start, end);
         let span = self.find_span(u);
         // Algorithm A2.2: the nonzero basis functions.
         let mut basis = vec![0.0; p + 1];
@@ -635,14 +667,20 @@ impl Nurbs {
     fn flatten(&self, tol_deg: f64) -> Vec<(f64, f64)> {
         const MIN_STEP: f64 = 1e-6;
         let tol = tol_deg.to_radians();
-        let first_knot = self.knots.iter().copied().find(|&k| k > 0.0).unwrap_or(1.0);
-        let mut step = first_knot / 3.0;
-        let mut u = 0.0;
-        let mut p1 = self.eval(0.0);
+        let (start, end) = self.domain();
+        let next_knot = self
+            .knots
+            .iter()
+            .copied()
+            .find(|&k| k > start)
+            .unwrap_or(end);
+        let mut step = (next_knot - start) / 3.0;
+        let mut u = start;
+        let mut p1 = self.eval(start);
         let mut points = vec![p1];
-        while u < 1.0 {
-            if u + step > 1.0 {
-                step = 1.0 - u;
+        while u < end {
+            if u + step > end {
+                step = end - u;
             }
             let p2 = self.eval(u + step);
             let test = self.eval(u + step / 2.0);
@@ -864,6 +902,81 @@ mod tests {
     fn missing_block_is_ignored() {
         let d = DxfDrawing::parse(&dxf("0\nINSERT\n2\nNOPE\n10\n0\n20\n0\n"), 5.0).unwrap();
         assert!(d.ignored.contains("INSERT"));
+    }
+
+    #[test]
+    fn unclamped_spline_is_evaluated_over_its_domain() {
+        // Uniform knots leave the start of the knot vector outside the curve's domain.
+        let curve = Nurbs::new(
+            2,
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            vec![1.0; 4],
+            vec![(0.0, 0.0), (1.0, 2.0), (2.0, 2.0), (3.0, 0.0)],
+        )
+        .unwrap();
+        let pts = curve.flatten(5.0);
+        assert!(pts.len() > 2);
+        assert!(pts.iter().all(|p| p.0.is_finite() && p.1.is_finite()));
+        // A uniform quadratic starts midway between its first two control points.
+        assert_abs_diff_eq!(pts[0].0, 0.5, epsilon = 1e-9);
+        assert_abs_diff_eq!(pts[0].1, 1.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(pts[pts.len() - 1].0, 2.5, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn invalid_spline_definitions_are_rejected() {
+        let points = vec![(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)];
+        let w = vec![1.0; 3];
+        assert!(Nurbs::new(1, vec![0.0, 2.0, 1.0, 3.0, 4.0], w.clone(), points.clone()).is_err());
+        assert!(
+            Nurbs::new(
+                1,
+                vec![0.0, 1.0, 2.0, 3.0, 4.0],
+                vec![1.0, 0.0, 1.0],
+                points.clone()
+            )
+            .is_err()
+        );
+        assert!(Nurbs::new(1, vec![0.0, 1.0, 2.0, 3.0, 4.0], vec![1.0], points.clone()).is_err());
+        // The parameter range is empty when the two ends of the domain coincide.
+        assert!(Nurbs::new(2, vec![0.0, 1.0, 1.0, 1.0, 1.0, 2.0], w, points).is_err());
+    }
+
+    #[test]
+    fn plinegen_flag_does_not_close_a_polyline() {
+        let verts = "10\n0\n20\n0\n10\n1\n20\n0\n10\n1\n20\n1\n";
+        let open =
+            DxfDrawing::parse(&dxf(&format!("0\nLWPOLYLINE\n70\n128\n{verts}")), 5.0).unwrap();
+        assert_eq!(open.strokes.len(), 2);
+        let closed =
+            DxfDrawing::parse(&dxf(&format!("0\nLWPOLYLINE\n70\n129\n{verts}")), 5.0).unwrap();
+        assert_eq!(closed.strokes.len(), 3);
+    }
+
+    #[test]
+    fn bulges_stay_aligned_past_vertex_widths() {
+        // Vertex 1 has widths and no bulge; vertex 2 has a bulge.
+        let d = DxfDrawing::parse(
+            &dxf("0\nLWPOLYLINE\n70\n0\n10\n0\n20\n0\n40\n1\n41\n1\n10\n2\n20\n0\n42\n1\n10\n4\n20\n0\n"),
+            30.0,
+        )
+        .unwrap();
+        assert_eq!(d.strokes[0], Stroke::new(0.0, 0.0, 2.0, 0.0));
+        assert!(d.strokes.len() > 2, "the bulge belongs to the second span");
+    }
+
+    #[test]
+    fn negative_group_codes_keep_pairs_aligned() {
+        let d =
+            DxfDrawing::parse(&dxf("0\nLINE\n-5\n10\n10\n1\n20\n2\n11\n3\n21\n4\n"), 5.0).unwrap();
+        assert_eq!(d.strokes, [Stroke::new(1.0, 2.0, 3.0, 4.0)]);
+    }
+
+    #[test]
+    fn non_finite_numbers_are_dropped() {
+        let d = DxfDrawing::parse(&dxf("0\nLINE\n10\nnan\n20\n0\n11\n1\n21\ninf\n"), 5.0).unwrap();
+        assert!(d.strokes.is_empty());
+        assert!(d.ignored.contains("LINE"));
     }
 
     #[test]

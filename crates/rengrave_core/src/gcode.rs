@@ -753,13 +753,18 @@ impl GcodeProgram {
     }
 
     /// Generates the program for a cleanup operation from paths computed by
-    /// [`crate::cleanup::CleanupPaths::calculate`].
+    /// [`crate::cleanup::CleanupPaths::calculate`]. Fails unless the job is a V-carve.
     pub fn generate_cleanup(
         coords: &[CarvePoint],
         bit: CleanupBit,
         settings: &Settings,
     ) -> Result<Vec<String>> {
         settings.ensure_valid()?;
+        if settings.cut_type != CutType::VCarve {
+            return Err(Error::NothingToCut(
+                "Cleanup operations apply only to V-carve jobs".into(),
+            ));
+        }
         let units = settings.units;
         let dp = units.coord_decimals();
         let mut depth = settings.max_cut_depth();

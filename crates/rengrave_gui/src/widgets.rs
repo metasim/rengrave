@@ -188,6 +188,9 @@ pub fn bit_profile(ui: &mut Ui, settings: &Settings) {
     let radius = (settings.effective_bit_dia() / 2.0).max(1e-9) as f32;
     let scale = (46.0 / depth).min(60.0 / radius);
     let (d, r) = (depth * scale, radius * scale);
+    if !d.is_finite() || !r.is_finite() {
+        return;
+    }
     let tip = pos2(cx, surface + d);
     let cut_fill = Color32::from_rgba_unmultiplied(120, 170, 220, 90);
     match settings.bit_shape {
