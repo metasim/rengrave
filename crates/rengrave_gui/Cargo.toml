@@ -1,0 +1,28 @@
+[package]
+name = "rengrave_gui"
+description = "egui desktop application for the rengrave G-code generator."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "rengrave-gui"
+path = "src/main.rs"
+
+[lib]
+name = "rengrave_gui"
+path = "src/lib.rs"
+
+[dependencies]
+rengrave_core.workspace = true
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
+
+[lints]
+workspace = true
