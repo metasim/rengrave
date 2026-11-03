@@ -4,7 +4,7 @@
 //! Application state and the top-level window layout.
 
 use crate::dialogs::{FileDialogs, FileKind};
-use crate::gcode_view::{Selection, Token};
+use crate::gcode_view::Token;
 use crate::icons;
 use crate::preview::{Preview, Scene};
 use crate::simulator::SimulatorView;
@@ -101,6 +101,14 @@ struct GcodeCache {
     lines: Result<Arc<Vec<String>>, String>,
 }
 
+/// The G-code program laid out for the text view.
+struct GcodeGalley {
+    lines: Arc<Vec<String>>,
+    dark: bool,
+    text: Arc<str>,
+    galley: Arc<egui::Galley>,
+}
+
 /// All application state.
 pub struct RengraveApp {
     pub(crate) ctx: egui::Context,
@@ -116,8 +124,10 @@ pub struct RengraveApp {
     pub active_view: ActiveView,
     /// Recalculate V-carve paths automatically after a change.
     pub live_carve: bool,
-    /// What is selected in the G-code view.
-    gcode_selection: Selection,
+    /// The laid-out G-code text, kept until the program or the theme changes.
+    gcode_galley: Option<GcodeGalley>,
+    /// The text selected in the G-code view when its context menu was opened.
+    gcode_selection: String,
     /// Interactive preview state.
     pub preview: Preview,
     /// Simulator playback state.
@@ -176,7 +186,8 @@ impl RengraveApp {
             tab: Tab::Design,
             active_view: ActiveView::Preview,
             live_carve: true,
-            gcode_selection: Selection::default(),
+            gcode_galley: None,
+            gcode_selection: String::new(),
             preview: Preview::default(),
             simulator: SimulatorView::default(),
             font_files: Vec::new(),
@@ -1124,76 +1135,77 @@ impl RengraveApp {
         }
         match self.gcode() {
             Ok(lines) => {
-                let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
                 let font = egui::TextStyle::Monospace.resolve(ui.style());
                 let dark = ui.visuals().dark_mode;
                 let plain = ui.visuals().text_color();
-                let char_width = ui
-                    .painter()
-                    .layout_no_wrap("0".into(), font.clone(), plain)
-                    .size()
-                    .x;
-                let highlight = ui.visuals().selection.bg_fill;
-                if ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)))
-                    && !self.gcode_selection.is_empty()
-                {
-                    ui.ctx().copy_text(self.gcode_selection.text(&lines));
-                }
-                egui::ScrollArea::both().auto_shrink(false).show_rows(
-                    ui,
-                    row_height,
-                    lines.len(),
-                    |ui, range| {
-                        for index in range {
-                            let line = &lines[index];
-                            let job = Token::highlight(line, &font, dark, plain);
-                            let galley = ui.painter().layout_job(job);
-                            let size =
-                                egui::vec2(galley.size().x.max(ui.available_width()), row_height);
-                            let (rect, row) =
-                                ui.allocate_exact_size(size, egui::Sense::click_and_drag());
-                            // Columns are counted in characters, which are equally wide.
-                            let position = |pointer: egui::Pos2| {
-                                let rows = ((pointer.y - rect.top()) / row_height).floor() as isize;
-                                let at = index.saturating_add_signed(rows).min(lines.len() - 1);
-                                let column = ((pointer.x - rect.left()) / char_width).round();
-                                (at, column.max(0.0) as usize)
-                            };
-                            row.widget_info(|| {
-                                egui::WidgetInfo::labeled(egui::Role::Label, true, line)
-                            });
-                            if row.hovered() {
-                                ui.set_cursor_icon(egui::CursorIcon::Text);
-                            }
-                            if let Some(pointer) = row.interact_pointer_pos() {
-                                if row.drag_started_by(egui::PointerButton::Primary) {
-                                    // A drag starts after the pointer has moved, so begin at the press.
-                                    let origin = ui.input(|i| i.pointer.press_origin());
-                                    let start = position(origin.unwrap_or(pointer));
-                                    self.gcode_selection = Selection::at(start);
-                                    self.gcode_selection.head = position(pointer);
-                                } else if row.dragged_by(egui::PointerButton::Primary) {
-                                    self.gcode_selection.head = position(pointer);
-                                }
-                            }
-                            if row.clicked_by(egui::PointerButton::Primary) {
-                                self.gcode_selection = Selection::default();
-                            }
-                            let len = line.chars().count();
-                            if let Some(columns) = self.gcode_selection.columns(index, len) {
-                                let x = rect.left() + columns.start as f32 * char_width;
-                                let width = columns.len().max(1) as f32 * char_width;
-                                let covered = egui::Rect::from_min_size(
-                                    egui::pos2(x, rect.top()),
-                                    egui::vec2(width, row_height),
-                                );
-                                ui.painter().rect_filled(covered, 0.0, highlight);
-                            }
-                            ui.painter().galley(rect.min, galley, plain);
-                            row.context_menu(|ui| self.gcode_context_menu(ui, &lines));
+                let current = self
+                    .gcode_galley
+                    .as_ref()
+                    .is_some_and(|c| Arc::ptr_eq(&c.lines, &lines) && c.dark == dark);
+                if !current {
+                    let mut text = String::new();
+                    let mut job = egui::text::LayoutJob::default();
+                    for line in lines.iter() {
+                        let highlighted = Token::highlight(line, &font, dark, plain);
+                        for section in &highlighted.sections {
+                            job.append(
+                                &highlighted.text
+                                    [section.byte_range.start.0..section.byte_range.end.0],
+                                0.0,
+                                section.format.clone(),
+                            );
                         }
-                    },
-                );
+                        job.append("\n", 0.0, egui::TextFormat::simple(font.clone(), plain));
+                        text.push_str(line);
+                        text.push('\n');
+                    }
+                    job.wrap.max_width = f32::INFINITY;
+                    self.gcode_galley = Some(GcodeGalley {
+                        lines: lines.clone(),
+                        dark,
+                        text: text.into(),
+                        galley: ui.painter().layout_job(job),
+                    });
+                }
+                let Some(GcodeGalley { text, galley, .. }) = &self.gcode_galley else {
+                    return;
+                };
+                let (text, galley) = (text.clone(), galley.clone());
+                let id = egui::Id::unique("gcode_text");
+                // egui moves the cursor on a right-click, so keep the selection through it.
+                let kept = ui
+                    .input(|i| i.pointer.secondary_pressed())
+                    .then(|| egui::TextEdit::load_state(ui.ctx(), id))
+                    .flatten()
+                    .and_then(|state| state.cursor.char_range());
+                if ui.input(|i| i.pointer.secondary_pressed()) {
+                    // The menu click clears the cursor, so remember what the menu will copy.
+                    self.gcode_selection = kept
+                        .filter(|range| !range.is_empty())
+                        .map(|range| range.slice_str(&text).to_owned())
+                        .unwrap_or_default();
+                }
+                let width = ui.available_width().max(galley.size().x + 16.0);
+                egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
+                    // A read-only buffer: it can be selected and copied, but not edited.
+                    let mut buffer: &str = &text;
+                    let mut layouter = |_: &Ui, _: &dyn egui::TextBuffer, _: f32| galley.clone();
+                    let output = egui::TextEdit::multiline(&mut buffer)
+                        .id(id)
+                        .layouter(&mut layouter)
+                        .desired_width(width)
+                        .frame(egui::Frame::NONE)
+                        .show(ui);
+                    if let Some(range) = kept
+                        && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id)
+                    {
+                        state.cursor.set_char_range(Some(range));
+                        state.store(ui.ctx(), id);
+                    }
+                    output
+                        .response
+                        .context_menu(|ui| self.gcode_context_menu(ui));
+                });
             }
             Err(e) => {
                 ui.centered_and_justified(|ui| ui.colored_label(ui.visuals().error_fg_color, e));
@@ -1201,13 +1213,12 @@ impl RengraveApp {
         }
     }
 
-    fn gcode_context_menu(&mut self, ui: &mut Ui, lines: &[String]) {
-        let has_selection = !self.gcode_selection.is_empty();
+    fn gcode_context_menu(&mut self, ui: &mut Ui) {
         if ui
-            .menu_item(has_selection, icons::COPY, "Copy", None)
+            .menu_item(!self.gcode_selection.is_empty(), icons::COPY, "Copy", None)
             .clicked()
         {
-            ui.ctx().copy_text(self.gcode_selection.text(lines));
+            ui.ctx().copy_text(self.gcode_selection.clone());
             ui.close();
         }
         if ui

@@ -173,80 +173,6 @@ impl Token {
     }
 }
 
-/// A text selection in the G-code view, as positions in the program.
-///
-/// The view draws its own selection, because egui drops a label selection on any mouse press,
-/// including the right-click that opens the context menu.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Selection {
-    /// Where the drag began, as a line and a character column.
-    pub anchor: (usize, usize),
-    /// Where the drag is now.
-    pub head: (usize, usize),
-}
-
-impl Selection {
-    /// A selection that covers nothing, at `position`.
-    pub fn at(position: (usize, usize)) -> Self {
-        Self {
-            anchor: position,
-            head: position,
-        }
-    }
-
-    /// Whether nothing is selected.
-    pub fn is_empty(&self) -> bool {
-        self.anchor == self.head
-    }
-
-    /// The start and end of the selection, in program order.
-    fn ordered(&self) -> ((usize, usize), (usize, usize)) {
-        if self.anchor <= self.head {
-            (self.anchor, self.head)
-        } else {
-            (self.head, self.anchor)
-        }
-    }
-
-    /// The character columns of `line` that are selected, given its length in characters.
-    pub fn columns(&self, line: usize, line_len: usize) -> Option<Range<usize>> {
-        let (start, end) = self.ordered();
-        if self.is_empty() || line < start.0 || line > end.0 {
-            return None;
-        }
-        let from = if line == start.0 {
-            start.1.min(line_len)
-        } else {
-            0
-        };
-        let to = if line == end.0 {
-            end.1.min(line_len)
-        } else {
-            line_len
-        };
-        Some(from..to)
-    }
-
-    /// The selected text of `lines`, with lines joined by newlines.
-    pub fn text(&self, lines: &[String]) -> String {
-        let (start, end) = self.ordered();
-        let mut out = Vec::new();
-        for (index, line) in lines.iter().enumerate().take(end.0 + 1).skip(start.0) {
-            let len = line.chars().count();
-            let Some(columns) = self.columns(index, len) else {
-                continue;
-            };
-            out.push(
-                line.chars()
-                    .skip(columns.start)
-                    .take(columns.len())
-                    .collect::<String>(),
-            );
-        }
-        out.join("\n")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,22 +344,5 @@ mod tests {
             colors.dedup();
             assert_eq!(colors.len(), special.len());
         }
-    }
-
-    #[test]
-    fn selection_text_spans_partial_lines() {
-        let lines: Vec<String> = ["G90", "G1 X1.0", "M5"].map(String::from).to_vec();
-        let selection = Selection {
-            anchor: (0, 1),
-            head: (1, 4),
-        };
-        assert_eq!(selection.text(&lines), "90\nG1 X");
-        let backwards = Selection {
-            anchor: selection.head,
-            head: selection.anchor,
-        };
-        assert_eq!(backwards.text(&lines), selection.text(&lines));
-        assert!(Selection::at((2, 1)).text(&lines).is_empty());
-        assert_eq!(selection.columns(2, 2), None);
     }
 }

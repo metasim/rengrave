@@ -29,6 +29,10 @@ pub struct SimulatorView {
     speed: f64,
     target: f64,
     show_path: bool,
+    resolution: usize,
+    relief: f32,
+    smooth: bool,
+    keep_position: bool,
     path_cache: Option<(ViewTransform, Arc<Vec<egui::Shape>>)>,
 }
 
@@ -43,6 +47,10 @@ impl Default for SimulatorView {
             speed: SPEEDS[2],
             target: 0.0,
             show_path: false,
+            resolution: Simulation::DEFAULT_RESOLUTION,
+            relief: 1.0,
+            smooth: true,
+            keep_position: false,
             path_cache: None,
         }
     }
@@ -67,6 +75,21 @@ impl SimulatorView {
     /// The selected speed, as a multiple of real time.
     pub fn speed(&self) -> f64 {
         self.speed
+    }
+
+    /// Grid cells along the longer side of the simulated stock.
+    pub fn resolution(&self) -> usize {
+        self.resolution
+    }
+
+    /// How much the shading exaggerates the depth of the cuts, where 1 is true to scale.
+    pub fn relief(&self) -> f32 {
+        self.relief
+    }
+
+    /// Whether the stock texture is filtered smoothly, rather than as sharp cells.
+    pub fn is_smooth(&self) -> bool {
+        self.smooth
     }
 
     /// The playback position, in seconds of program time.
@@ -94,11 +117,17 @@ impl SimulatorView {
         self.source = Some(lines.clone());
         self.texture = None;
         self.path_cache = None;
-        self.playing = false;
-        self.target = 0.0;
-        match Simulation::new(lines, design, settings) {
+        // A change of resolution rebuilds the same program, so stay where playback was.
+        let keep = std::mem::take(&mut self.keep_position);
+        if !keep {
+            self.playing = false;
+            self.target = 0.0;
+        }
+        match Simulation::new(lines, design, settings, self.resolution) {
             Ok(sim) => {
-                self.speed = Self::comfortable_speed(sim.total_seconds());
+                if !keep {
+                    self.speed = Self::comfortable_speed(sim.total_seconds());
+                }
                 self.sim = Some(sim);
                 self.error = None;
             }
@@ -168,6 +197,32 @@ impl SimulatorView {
         ui.separator();
         ui.toggle_button(&mut self.show_path, "Path")
             .on_hover_text("Show the whole tool path: cuts and rapid moves");
+        ui.separator();
+        ui.option_group(|ui| {
+            for resolution in Simulation::RESOLUTIONS {
+                let chosen = ui
+                    .selectable_label(self.resolution == resolution, resolution.to_string())
+                    .on_hover_text("Cells along the longer side of the stock. Finer is slower.");
+                if chosen.clicked() && self.resolution != resolution {
+                    self.resolution = resolution;
+                    // Forget the program, so that it is simulated again at the new resolution.
+                    self.source = None;
+                    self.keep_position = true;
+                }
+            }
+        });
+        let relief = ui
+            .add(egui::Slider::new(&mut self.relief, 0.5..=5.0).text("Relief"))
+            .on_hover_text(
+                "Exaggerate the depth of the cuts in the shading. The cuts are unchanged.",
+            );
+        let smooth = ui
+            .toggle_button(&mut self.smooth, "Smooth")
+            .on_hover_text("Blend the stock between cells, instead of showing each cell sharply");
+        if relief.changed() || smooth.changed() {
+            // Both change how every cell is drawn, so draw the whole texture again.
+            self.texture = None;
+        }
     }
 
     /// Draws the scrub bar, messages, and stock, and advances playback.
@@ -289,6 +344,12 @@ impl SimulatorView {
         };
         let dirty = sim.take_dirty();
         let (nx, ny) = sim.grid_size();
+        let relief = self.relief;
+        let options = if self.smooth {
+            TextureOptions::LINEAR
+        } else {
+            TextureOptions::NEAREST
+        };
         match (&mut self.texture, dirty) {
             (None, _) => {
                 let all = CellRect {
@@ -299,15 +360,15 @@ impl SimulatorView {
                 };
                 self.texture = Some(ctx.load_texture(
                     "simulated stock",
-                    Self::shade(sim, all),
-                    TextureOptions::LINEAR,
+                    Self::shade(sim, all, relief),
+                    options,
                 ));
             }
             (Some(texture), Some(rect)) => {
                 texture.set_partial(
                     [rect.min_i, ny - 1 - rect.max_j],
-                    Self::shade(sim, rect),
-                    TextureOptions::LINEAR,
+                    Self::shade(sim, rect, relief),
+                    options,
                 );
             }
             (Some(_), None) => {}
@@ -315,7 +376,7 @@ impl SimulatorView {
     }
 
     /// Renders a rectangle of the stock with a light from the upper left, top row first.
-    fn shade(sim: &Simulation, rect: CellRect) -> ColorImage {
+    fn shade(sim: &Simulation, rect: CellRect, relief: f32) -> ColorImage {
         const WOOD: [f32; 3] = [222.0, 184.0, 135.0];
         let (nx, ny) = sim.grid_size();
         let (top, bottom) = sim.stock_range();
@@ -327,11 +388,11 @@ impl SimulatorView {
         for j in (rect.min_j..=rect.max_j).rev() {
             for i in rect.min_i..=rect.max_i {
                 let z = sim.height(i, j);
-                let dzdx = (sim.height((i + 1).min(nx - 1), j)
-                    - sim.height(i.saturating_sub(1), j))
+                let dzdx = relief
+                    * (sim.height((i + 1).min(nx - 1), j) - sim.height(i.saturating_sub(1), j))
                     / (2.0 * cell);
-                let dzdy = (sim.height(i, (j + 1).min(ny - 1))
-                    - sim.height(i, j.saturating_sub(1)))
+                let dzdy = relief
+                    * (sim.height(i, (j + 1).min(ny - 1)) - sim.height(i, j.saturating_sub(1)))
                     / (2.0 * cell);
                 // Lambert shading of the surface normal (-dzdx, -dzdy, 1).
                 let normal_len = (dzdx * dzdx + dzdy * dzdy + 1.0).sqrt();
@@ -445,7 +506,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        Simulation::new(&program, &design, &settings).unwrap()
+        Simulation::new(&program, &design, &settings, Simulation::DEFAULT_RESOLUTION).unwrap()
     }
 
     #[test]
@@ -458,13 +519,13 @@ mod tests {
             max_i: nx - 1,
             max_j: ny - 1,
         };
-        let before = SimulatorView::shade(&sim, all);
+        let before = SimulatorView::shade(&sim, all, 1.0);
         assert_eq!(before.size, [nx, ny]);
         let uncut = before.pixels[0];
         assert!(before.pixels.iter().all(|p| *p == uncut));
 
         sim.run_to_end();
-        let after = SimulatorView::shade(&sim, all);
+        let after = SimulatorView::shade(&sim, all, 1.0);
         assert_eq!(after.pixels[0], uncut, "the corner stays uncut");
 
         // The groove lies in the lower half of Y here, so it is in the lower half of the image.
@@ -489,6 +550,7 @@ mod tests {
                 max_i: nx - 1,
                 max_j: ny - 1,
             },
+            1.0,
         );
         let rect = CellRect {
             min_i: 3,
@@ -496,7 +558,7 @@ mod tests {
             max_i: 40,
             max_j: 90,
         };
-        let part = SimulatorView::shade(&sim, rect);
+        let part = SimulatorView::shade(&sim, rect, 1.0);
         assert_eq!(part.size, [38, 86]);
         // The first pixel is the top left: the highest row of the rectangle.
         let expected = all.pixels[(ny - 1 - rect.max_j) * nx + rect.min_i];
@@ -515,5 +577,23 @@ mod tests {
         assert!(shapes.len() >= 2);
         let empty = SimulatorView::build_path_shapes(&[], &t);
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn relief_exaggerates_the_shading_without_changing_the_stock() {
+        let mut sim = simulated();
+        sim.run_to_end();
+        let (nx, ny) = sim.grid_size();
+        let all = CellRect {
+            min_i: 0,
+            min_j: 0,
+            max_i: nx - 1,
+            max_j: ny - 1,
+        };
+        let flat = SimulatorView::shade(&sim, all, 1.0);
+        let deep = SimulatorView::shade(&sim, all, 4.0);
+        assert_ne!(flat.pixels, deep.pixels);
+        // Cells away from any edge look the same, so only the walls of the groove change.
+        assert_eq!(flat.pixels[0], deep.pixels[0]);
     }
 }
