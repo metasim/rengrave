@@ -620,20 +620,45 @@ impl RengraveApp {
     }
 
     fn bit_section(&mut self, ui: &mut Ui) {
-        ui.segmented(
-            &mut self.settings.bit_shape,
-            &[
-                (BitShape::VBit, "V-bit", "A pointed conical bit"),
-                (BitShape::Ball, "Ball nose", "A ball-nose end mill"),
-                (
-                    BitShape::Flat,
-                    "Straight",
-                    "A flat end mill, which clears only where it fits",
-                ),
-            ],
-        );
-        ui.add_space(8.0);
-        ui.bit_profile(&self.settings);
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            // Fill the width, so that the box lines up with the controls below it.
+            ui.set_min_width(ui.available_width());
+            // A framed group does not center itself, so pad by half the room left over, using the
+            // width it had on the last frame.
+            let id = ui.scope_id().with("bit_choice_width");
+            let known: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
+            let room = ui.available_width();
+            let choice = ui
+                .horizontal(|ui| {
+                    // Without a known width, add nothing, so the panel is never pushed wider.
+                    if known > 0.0 {
+                        ui.add_space(((room - known) / 2.0).max(0.0));
+                    }
+                    ui.scope(|ui| {
+                        ui.segmented(
+                            &mut self.settings.bit_shape,
+                            &[
+                                (BitShape::VBit, "V-bit", "A pointed conical bit"),
+                                (BitShape::Ball, "Ball nose", "A ball-nose end mill"),
+                                (
+                                    BitShape::Flat,
+                                    "Straight",
+                                    "A flat end mill, which clears only where it fits",
+                                ),
+                            ],
+                        );
+                    })
+                    .response
+                })
+                .inner;
+            if (choice.rect.width() - known).abs() > 0.5 {
+                ui.data_mut(|d| d.insert_temp(id, choice.rect.width()));
+                ui.ctx().request_repaint();
+            }
+            ui.add_space(8.0);
+            ui.vertical_centered(|ui| ui.bit_profile(&self.settings));
+        });
+        ui.add_space(4.0);
         let unit = self.unit();
         let issues = self.issues.clone();
         let mut form = Form {
