@@ -42,6 +42,16 @@ This produces two programs in `target/release`: `rengrave` and `rengrave-gui`.
 cargo run --release --bin rengrave-gui
 ```
 
+On macOS, build a `Rengrave.app` bundle with [cargo-bundle](https://github.com/burtonageo/cargo-bundle)
+(`cargo install cargo-bundle`). The bundle gives the application menu its "Rengrave" name. It has
+no icon yet.
+
+```bash
+cd crates/rengrave_gui && cargo bundle --release
+```
+
+The app is written to `target/release/bundle/osx/Rengrave.app`.
+
 The window shows the design, its carved area, and the tool path, recalculating after each change.
 Choose the text and font on the **Design** tab and the bit on the **Toolpath** tab, then press
 **Save G-code…**.
