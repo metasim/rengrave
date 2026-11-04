@@ -142,11 +142,11 @@ impl RengraveApp {
             });
         ui.separator();
         if ui
-            .icon_button(true, icons::OPEN, "Add font file…")
-            .on_hover_text("Add a font file to your library")
+            .icon_button(true, icons::SETTINGS, "Manage fonts…")
+            .on_hover_text("Add or remove your own font files")
             .clicked()
         {
-            self.add_font_dialog();
+            self.show_app_settings(crate::preferences::SettingsPage::Fonts);
             ui.close();
         }
     }

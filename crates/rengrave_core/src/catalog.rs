@@ -9,6 +9,7 @@
 
 use crate::error::{Error, Result};
 use crate::font::{Font, extension_upper};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -71,13 +72,14 @@ impl FromStr for FontRef {
 }
 
 /// A font file the user added to their library.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserFont {
     /// The name the library lists the font under.
     pub name: String,
     /// The `.cxf`, `.ttf`, `.otf`, `.ttc`, or `.otc` file.
     pub path: PathBuf,
     /// The font within a collection file; zero for a single font.
+    #[serde(default)]
     pub face: u32,
 }
 

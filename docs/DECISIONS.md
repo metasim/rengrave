@@ -48,6 +48,13 @@ characters in the text are loaded, so large fonts stay cheap. Output can differ 
 that have different fonts. Settings files no longer carry F-Engrave's `fontdir` and `fontfile`
 keys; the reader ignores them. See `docs/PLAN_SYSTEM_FONTS.md`.
 
+The user library is application state, not job state. It is kept in `settings.yaml` in the
+platform's configuration directory (found with `directories`, the crate `eframe`'s own tests use to
+check its storage path), written with `serde` and `serde_norway`. The desktop application and
+`rengrave-cli` share the file; `RENGRAVE_SETTINGS` overrides its location. The YAML crate's parser
+is a translation of libyaml and contains `unsafe` code, which was accepted for a small,
+user-controlled file. Job settings keep their own text format.
+
 ## D6. Bitmap tracing: native tracer, with potrace optional
 
 The original requires the external `potrace` program. To keep "runnable with no helper

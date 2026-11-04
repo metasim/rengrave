@@ -93,6 +93,16 @@ direction, or press **Finish** to see the result. Run times are estimates that i
 
 A file path on the command line (`rengrave job.ngc`) opens that settings file, font, or image.
 
+### Your fonts
+
+Installed fonts are always listed under **System fonts**. To use a font file that is not
+installed (including CXF stroke fonts), choose **Manage fonts…** in the font list, or **Edit ▸
+Application settings…**, and add it; it then appears under **User fonts**. Dropping a font file on
+the window adds it too. Your fonts are kept in `settings.yaml` in the application's configuration
+folder (`~/Library/Application Support/Rengrave` on macOS, `%APPDATA%\Rengrave\config` on
+Windows, `~/.config/rengrave` on Linux), which `rengrave-cli` reads as well, so
+`--font user:<name>` works in both. Set `RENGRAVE_SETTINGS` to use another file.
+
 ### Command line
 
 V-carve some text in the default system font, in millimeters:

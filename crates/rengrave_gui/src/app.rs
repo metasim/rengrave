@@ -137,6 +137,12 @@ pub struct RengraveApp {
     pub(crate) fonts: Arc<FontCatalog>,
     pub(crate) font_filter: String,
     show_about: bool,
+    /// Whether the application settings dialog is open.
+    pub(crate) show_app_settings: bool,
+    /// The page of the application settings dialog.
+    pub(crate) settings_page: crate::preferences::SettingsPage,
+    /// The file the application settings are kept in, if any.
+    pub(crate) app_settings_path: Option<std::path::PathBuf>,
 
     /// The most recent calculation request.
     generation: u64,
@@ -194,7 +200,11 @@ impl RengraveApp {
 
     /// Creates the application, using `dialogs` to ask for files.
     pub fn new(ctx: egui::Context, dialogs: Box<dyn FileDialogs>) -> Self {
-        Self::with_fonts(ctx, dialogs, Arc::new(FontCatalog::with_system_fonts()))
+        let mut app = Self::with_fonts(ctx, dialogs, Arc::new(FontCatalog::with_system_fonts()));
+        if let Some(path) = rengrave_core::AppSettings::default_path() {
+            app.use_app_settings(path);
+        }
+        app
     }
 
     /// Creates the application with its own catalog of fonts. Tests use this to avoid depending
@@ -222,6 +232,9 @@ impl RengraveApp {
             fonts,
             font_filter: String::new(),
             show_about: false,
+            show_app_settings: false,
+            settings_page: crate::preferences::SettingsPage::default(),
+            app_settings_path: None,
             generation: 0,
             requested: None,
             changed_at: None,
@@ -709,7 +722,7 @@ impl RengraveApp {
                     format!("Unable to read {}: {e}", path.display()),
                 ),
             },
-            "CXF" | "TTF" | "OTF" | "TTC" | "OTC" => self.add_font_file(path),
+            "CXF" | "TTF" | "OTF" | "TTC" | "OTC" => self.add_font_file(path, true),
             _ => {
                 self.settings.input_type = InputType::Image;
                 self.settings.image_file = path.to_path_buf();
@@ -733,9 +746,9 @@ impl RengraveApp {
     }
 
     /// Asks for a font file to add to the library.
-    pub(crate) fn add_font_dialog(&mut self) {
+    pub(crate) fn add_font_dialog(&mut self, select: bool) {
         if let Some(path) = self.dialogs.pick_file(FileKind::Font, None) {
-            self.add_font_file(&path);
+            self.add_font_file(&path, select);
         }
     }
 
@@ -744,12 +757,15 @@ impl RengraveApp {
         &self.fonts
     }
 
-    /// Adds a font file to the user's library and selects it for the text.
-    pub(crate) fn add_font_file(&mut self, path: &Path) {
+    /// Adds a font file to the user's library, and with `select`, uses it for the text.
+    pub(crate) fn add_font_file(&mut self, path: &Path, select: bool) {
         match self.fonts.add_user_font(path, None) {
             Ok(font) => {
-                self.settings.input_type = InputType::Text;
-                self.settings.font = FontRef::User(font.name);
+                if select {
+                    self.settings.input_type = InputType::Text;
+                    self.settings.font = FontRef::User(font.name);
+                }
+                self.save_app_settings();
             }
             Err(e) => self.notify(StatusLevel::Error, e.to_string()),
         }
@@ -829,6 +845,7 @@ impl RengraveApp {
             .show(ui, |ui| self.main_area(ui));
 
         self.about_window(ui);
+        self.app_settings_window(ui);
         if self.busy || self.cleanup_busy {
             // The worker wakes the UI on progress, but keep cancellation responsive too.
             ui.ctx()
@@ -953,6 +970,15 @@ impl RengraveApp {
                     ui.separator();
                     if ui.menu_item(true, icons::QUIT, "Quit", None).clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+                ui.menu_button("Edit", |ui| {
+                    if ui
+                        .menu_item(true, icons::SETTINGS, "Application settings…", None)
+                        .clicked()
+                    {
+                        self.show_app_settings(crate::preferences::SettingsPage::default());
+                        ui.close();
                     }
                 });
                 ui.menu_button("View", |ui| {
