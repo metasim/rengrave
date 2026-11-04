@@ -26,14 +26,14 @@ fn main() -> eframe::Result {
     let file: Option<PathBuf> = std::env::args_os().nth(1).map(PathBuf::from);
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("rengrave")
+            .with_title("Rengrave")
             .with_inner_size([1180.0, 760.0])
             .with_min_inner_size([760.0, 480.0])
             .with_drag_and_drop(true),
         ..Default::default()
     };
     eframe::run_native(
-        "rengrave",
+        "Rengrave",
         native,
         Box::new(move |cc| {
             let mut app = RengraveApp::new(cc.egui_ctx.clone(), Box::new(NativeDialogs));

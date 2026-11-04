@@ -106,6 +106,14 @@ pub trait UiExt {
     /// a tooltip. A line runs across the available width, open beneath the selected tab.
     fn tab_bar<T: Copy + PartialEq>(&mut self, value: &mut T, choices: &[(T, &str, &str)]);
 
+    /// Like `tab_bar`, with `trailing` laid out right to left at the end of the row.
+    fn tab_bar_with<T: Copy + PartialEq>(
+        &mut self,
+        value: &mut T,
+        choices: &[(T, &str, &str)],
+        trailing: impl FnOnce(&mut Ui),
+    );
+
     /// Text for a label that names a control, in the accent color.
     fn control_label(&self, text: impl Into<String>) -> RichText;
 
@@ -115,8 +123,9 @@ pub trait UiExt {
     /// A button with an icon before its text. Its accessible name is the text alone.
     fn icon_button(&mut self, enabled: bool, icon: char, text: &str) -> Response;
 
-    /// A button that switches `value` on and off, and looks like a button in both states.
-    fn toggle_button(&mut self, value: &mut bool, text: &str) -> Response;
+    /// A toolbar button that opens a popover of controls. The popover stays open while its
+    /// controls are used, and closes on a click outside it.
+    fn options_menu(&mut self, label: &str, tip: &str, add: impl FnOnce(&mut Ui));
 
     /// A menu entry with an icon, and optionally the text of its keyboard shortcut.
     fn menu_item(
@@ -142,6 +151,9 @@ pub trait UiExt {
 
     /// Lays out a two-column form with a consistent label width.
     fn form_grid(&mut self, id: &str, add: impl FnOnce(&mut Ui));
+
+    /// Like `form_grid`, but the label column is only as wide as its longest label.
+    fn compact_form_grid(&mut self, id: &str, add: impl FnOnce(&mut Ui));
 
     /// A labeled single-line text field, with a small button that restores `default`.
     fn resettable_text(&mut self, name: &str, tip: &str, value: &mut String, default: &str);
@@ -178,6 +190,15 @@ impl TabShape {
 
 impl UiExt for Ui {
     fn tab_bar<T: Copy + PartialEq>(&mut self, value: &mut T, choices: &[(T, &str, &str)]) {
+        self.tab_bar_with(value, choices, |_| {});
+    }
+
+    fn tab_bar_with<T: Copy + PartialEq>(
+        &mut self,
+        value: &mut T,
+        choices: &[(T, &str, &str)],
+        trailing: impl FnOnce(&mut Ui),
+    ) {
         let row = self.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let mut tabs = Vec::with_capacity(choices.len());
@@ -200,6 +221,7 @@ impl UiExt for Ui {
                 }
                 tabs.push((rect, response, galley, *value == choice));
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), trailing);
             tabs
         });
         let tabs = row.inner;
@@ -287,21 +309,22 @@ impl UiExt for Ui {
             });
     }
 
+    fn options_menu(&mut self, label: &str, tip: &str, add: impl FnOnce(&mut Ui)) {
+        let config = egui::containers::menu::MenuConfig::new()
+            .style(Look::menu_style)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        let (button, _) = egui::containers::menu::MenuButton::new(label)
+            .config(config)
+            .ui(self, add);
+        button.on_hover_text(tip);
+    }
+
     fn control_label(&self, text: impl Into<String>) -> RichText {
         RichText::new(text).color(self.visuals().hyperlink_color)
     }
 
     fn section_heading(&self, text: impl Into<String>) -> RichText {
         Look::bold(text).color(self.visuals().hyperlink_color)
-    }
-
-    fn toggle_button(&mut self, value: &mut bool, text: &str) -> Response {
-        let mut response = self.add(egui::Button::new(text).selected(*value));
-        if response.clicked() {
-            *value = !*value;
-            response.mark_changed();
-        }
-        response
     }
 
     fn icon_button(&mut self, enabled: bool, icon: char, text: &str) -> Response {
@@ -469,6 +492,19 @@ impl UiExt for Ui {
             return;
         }
         let tip = pos2(cx, surface + d);
+        // Hatch marks under the surface line show the material, as in a mechanical drawing.
+        let opening = match settings.bit_shape {
+            BitShape::Ball => (settings.v_bit_dia / 2.0) as f32 * scale,
+            _ => r,
+        };
+        let hatch = Stroke::new(1.0, self.visuals().weak_text_color());
+        let mut x = rect.left() + 4.0;
+        while x < rect.right() {
+            if (x - cx).abs() > opening + 1.0 {
+                painter.line_segment([pos2(x, surface), pos2(x - 6.0, surface + 6.0)], hatch);
+            }
+            x += 7.0;
+        }
         let cut_fill = Color32::from_rgba_unmultiplied(120, 170, 220, 90);
         match settings.bit_shape {
             BitShape::VBit => {
@@ -503,9 +539,20 @@ impl UiExt for Ui {
                     ));
                 }
                 pts.push(pos2(cx + full_radius, rect.top()));
+                // The carved area is the part of the bit below the surface.
+                let carved = pts[1..=n + 1]
+                    .iter()
+                    .map(|p| pos2(p.x, p.y.max(surface)))
+                    .collect();
+                painter.add(egui::Shape::convex_polygon(carved, cut_fill, Stroke::NONE));
                 painter.line(pts, stroke);
             }
             BitShape::Flat => {
+                painter.rect_filled(
+                    egui::Rect::from_min_max(pos2(cx - r, surface), pos2(cx + r, tip.y)),
+                    0.0,
+                    cut_fill,
+                );
                 painter.line(
                     vec![
                         pos2(cx - r, rect.top()),
@@ -523,6 +570,13 @@ impl UiExt for Ui {
         egui::Grid::new(id)
             .num_columns(2)
             .min_col_width(118.0)
+            .spacing([8.0, 4.0])
+            .show(self, add);
+    }
+
+    fn compact_form_grid(&mut self, id: &str, add: impl FnOnce(&mut Ui)) {
+        egui::Grid::new(id)
+            .num_columns(2)
             .spacing([8.0, 4.0])
             .show(self, add);
     }

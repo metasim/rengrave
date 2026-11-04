@@ -15,7 +15,7 @@ use egui::{CentralPanel, Key, KeyboardShortcut, Modifiers, Panel, RichText, Ui};
 use rengrave_core::font::{Font, extension_upper};
 use rengrave_core::{
     CarvePath, CarvePoint, CleanupBit, CleanupOps, CutType, Design, GcodeProgram, InputType, Issue,
-    Settings, Units,
+    Justify, Settings, Units,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,6 +25,7 @@ const DEBOUNCE_SECONDS: f64 = 0.12;
 
 const SAVE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
 const COPY_GCODE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::G);
+const NEW: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
 const OPEN: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::O);
 const FIT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Num0);
 
@@ -101,6 +102,14 @@ struct GcodeCache {
     lines: Result<Arc<Vec<String>>, String>,
 }
 
+/// The G-code program laid out for the text view.
+struct GcodeGalley {
+    lines: Arc<Vec<String>>,
+    dark: bool,
+    text: Arc<str>,
+    galley: Arc<egui::Galley>,
+}
+
 /// All application state.
 pub struct RengraveApp {
     pub(crate) ctx: egui::Context,
@@ -116,6 +125,10 @@ pub struct RengraveApp {
     pub active_view: ActiveView,
     /// Recalculate V-carve paths automatically after a change.
     pub live_carve: bool,
+    /// The laid-out G-code text, kept until the program or the theme changes.
+    gcode_galley: Option<GcodeGalley>,
+    /// The text selected in the G-code view when its context menu was opened.
+    gcode_selection: String,
     /// Interactive preview state.
     pub preview: Preview,
     /// Simulator playback state.
@@ -155,25 +168,46 @@ pub struct RengraveApp {
 }
 
 impl RengraveApp {
+    /// The settings of a new job.
+    fn default_settings() -> Settings {
+        let mut settings = Settings {
+            cut_type: CutType::VCarve,
+            text: "F-engrave\nFan!".into(),
+            justify: Justify::Center,
+            y_scale: 1.0,
+            v_step_len: 0.01,
+            ..Settings::default()
+        };
+        // Set in inches, then converted: a one-inch design in millimeters.
+        settings.set_units(Units::Millimeters);
+        settings
+    }
+
+    /// Starts over with the default settings, discarding the current job.
+    pub fn new_job(&mut self) {
+        self.settings = Self::default_settings();
+        self.preview.fit();
+        self.notify(
+            StatusLevel::Info,
+            "Started a new job with the default settings",
+        );
+    }
+
     /// Creates the application, using `dialogs` to ask for files.
     pub fn new(ctx: egui::Context, dialogs: Box<dyn FileDialogs>) -> Self {
         Look::install(&ctx);
         let notify = ctx.clone();
         Self {
             ctx,
-            settings: Settings {
-                cut_type: CutType::VCarve,
-                text: "rengrave".into(),
-                y_scale: 1.0,
-                v_step_len: 0.01,
-                ..Settings::default()
-            },
+            settings: Self::default_settings(),
             issues: Vec::new(),
             dialogs,
             worker: Worker::spawn(move || notify.request_repaint()),
             tab: Tab::Design,
             active_view: ActiveView::Preview,
             live_carve: true,
+            gcode_galley: None,
+            gcode_selection: String::new(),
             preview: Preview::default(),
             simulator: SimulatorView::default(),
             font_files: Vec::new(),
@@ -735,6 +769,9 @@ impl RengraveApp {
         if ctx.input_mut(|i| i.consume_shortcut(&COPY_GCODE)) {
             self.copy_gcode();
         }
+        if ctx.input_mut(|i| i.consume_shortcut(&NEW)) {
+            self.new_job();
+        }
         if ctx.input_mut(|i| i.consume_shortcut(&OPEN)) {
             self.open_image_dialog();
         }
@@ -803,6 +840,18 @@ impl RengraveApp {
             .config(egui::containers::menu::MenuConfig::new().style(Look::menu_style))
             .ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
+                    if ui
+                        .menu_item(
+                            true,
+                            icons::NEW,
+                            "New",
+                            Some(ui.ctx().format_shortcut(&NEW)),
+                        )
+                        .clicked()
+                    {
+                        self.new_job();
+                        ui.close();
+                    }
                     if ui
                         .menu_item(
                             true,
@@ -879,27 +928,26 @@ impl RengraveApp {
                         ui.close();
                     }
                     ui.separator();
-                    if ui
-                        .menu_item(true, icons::EXPORT, "Export SVG…", None)
-                        .clicked()
-                    {
-                        self.save_svg();
-                        ui.close();
-                    }
-                    if ui
-                        .menu_item(true, icons::EXPORT, "Export DXF…", None)
-                        .clicked()
-                    {
-                        self.save_dxf(false);
-                        ui.close();
-                    }
-                    if ui
-                        .menu_item(true, icons::EXPORT, "Export DXF with closed loops…", None)
-                        .clicked()
-                    {
-                        self.save_dxf(true);
-                        ui.close();
-                    }
+                    let export = ui.menu_button((Look::icon(icons::EXPORT), "Export"), |ui| {
+                        if ui.menu_item(true, icons::EXPORT, "SVG…", None).clicked() {
+                            self.save_svg();
+                            ui.close();
+                        }
+                        if ui.menu_item(true, icons::EXPORT, "DXF…", None).clicked() {
+                            self.save_dxf(false);
+                            ui.close();
+                        }
+                        if ui
+                            .menu_item(true, icons::EXPORT, "DXF with closed loops…", None)
+                            .clicked()
+                        {
+                            self.save_dxf(true);
+                            ui.close();
+                        }
+                    });
+                    export.response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, "Export")
+                    });
                     ui.separator();
                     if ui.menu_item(true, icons::QUIT, "Quit", None).clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -918,19 +966,10 @@ impl RengraveApp {
                         self.preview.fit();
                         ui.close();
                     }
-                    ui.separator();
-                    ui.checkbox(&mut self.preview.layers.grid, "Grid");
-                    ui.checkbox(&mut self.settings.show_axis, "Origin axes");
-                    ui.checkbox(&mut self.settings.show_box, "Bounding box");
-                    ui.checkbox(&mut self.settings.show_thick, "Line thickness");
-                    ui.checkbox(&mut self.settings.show_v_area, "Carved area");
-                    ui.checkbox(&mut self.settings.show_v_path, "Tool path");
-                    ui.checkbox(&mut self.preview.layers.clean_straight, "Straight cleanup");
-                    ui.checkbox(&mut self.preview.layers.clean_v_bit, "V-bit cleanup");
                 });
                 ui.menu_button("Help", |ui| {
                     if ui
-                        .menu_item(true, icons::INFO, "About rengrave", None)
+                        .menu_item(true, icons::INFO, "About Rengrave", None)
                         .clicked()
                     {
                         self.show_about = true;
@@ -1003,8 +1042,9 @@ impl RengraveApp {
                 bottom: 0,
             })
             .show(ui, |ui| {
-                ui.tab_bar(
-                    &mut self.active_view,
+                let mut view = self.active_view;
+                ui.tab_bar_with(
+                    &mut view,
                     &[
                         (
                             ActiveView::Preview,
@@ -1022,28 +1062,26 @@ impl RengraveApp {
                             "The text of the G-code program",
                         ),
                     ],
+                    |ui| self.carve_controls(ui),
                 );
+                self.active_view = view;
             });
-        // The tools belong to the pane, so that the tabs connect to it directly.
-        egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(8, 4))
-            .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| match self.active_view {
-                    ActiveView::Preview => self.preview_toolbar(ui),
-                    ActiveView::Simulator => {
-                        self.fit_button(ui);
-                        self.simulator.toolbar(ui);
-                    }
-                    ActiveView::Gcode => {
-                        if ui
-                            .icon_button(self.can_write_gcode(), icons::COPY, "Copy")
-                            .clicked()
-                        {
-                            self.copy_gcode();
+        // The tools belong to the pane, so that the tabs connect to it directly. The G-code view
+        // has only a Copy button, which floats over the text instead of taking a row.
+        if self.active_view != ActiveView::Gcode {
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(8, 4))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| match self.active_view {
+                        ActiveView::Simulator => {
+                            self.fit_button(ui);
+                            self.simulator.toolbar(ui);
                         }
-                    }
+                        _ => self.preview_toolbar(ui),
+                    });
                 });
-            });
+        }
+        let view_corner = ui.available_rect_before_wrap().right_top();
         match self.active_view {
             ActiveView::Preview => {
                 let scene = Scene {
@@ -1055,9 +1093,28 @@ impl RengraveApp {
                 self.preview
                     .show(ui, &scene, &self.settings, self.scene_revision);
             }
-            ActiveView::Gcode => self.gcode_view(ui),
+            ActiveView::Gcode => {
+                self.gcode_view(ui);
+                self.copy_overlay(ui, view_corner);
+            }
             ActiveView::Simulator => self.simulator_view(ui),
         }
+    }
+
+    /// A Copy button floating at the top right of the G-code text, clear of its scroll bar.
+    fn copy_overlay(&mut self, ui: &mut Ui, corner: egui::Pos2) {
+        egui::Area::new(egui::Id::unique("gcode_copy"))
+            .order(egui::Order::Foreground)
+            .pivot(egui::Align2::RIGHT_TOP)
+            .fixed_pos(corner + egui::vec2(-24.0, 8.0))
+            .show(ui.ctx(), |ui| {
+                if ui
+                    .icon_button(self.can_write_gcode(), icons::COPY, "Copy")
+                    .clicked()
+                {
+                    self.copy_gcode();
+                }
+            });
     }
 
     fn simulator_view(&mut self, ui: &mut Ui) {
@@ -1096,13 +1153,29 @@ impl RengraveApp {
 
     fn preview_toolbar(&mut self, ui: &mut Ui) {
         self.fit_button(ui);
-        if self.settings.cut_type == CutType::VCarve {
-            ui.toggle_button(&mut self.settings.show_v_area, "Area")
-                .on_hover_text("Show the area cut by the V-bit");
-            ui.toggle_button(&mut self.settings.show_v_path, "Path")
-                .on_hover_text("Show the path of the tool");
-        }
-        ui.toggle_button(&mut self.preview.layers.grid, "Grid");
+        ui.separator();
+        ui.options_menu("Layers", "What the preview shows", |ui| {
+            if self.settings.cut_type == CutType::VCarve {
+                ui.checkbox(&mut self.settings.show_v_area, "Carved area")
+                    .on_hover_text("Show the area cut by the V-bit");
+                ui.checkbox(&mut self.settings.show_v_path, "Tool path")
+                    .on_hover_text("Show the path of the tool");
+            }
+            ui.checkbox(&mut self.preview.layers.grid, "Grid")
+                .on_hover_text("Show grid lines and axis labels behind the design");
+            ui.checkbox(&mut self.settings.show_axis, "Origin axes")
+                .on_hover_text("Show arrows along the X and Y axes at the work origin");
+            ui.checkbox(&mut self.settings.show_box, "Bounding box")
+                .on_hover_text("Shade the smallest rectangle that holds the design");
+            ui.checkbox(&mut self.settings.show_thick, "Line thickness")
+                .on_hover_text(
+                    "Draw engraved outlines at the width of the bit instead of a hairline",
+                );
+            ui.checkbox(&mut self.preview.layers.clean_straight, "Straight cleanup")
+                .on_hover_text("Show the paths of the straight-bit cleanup, once calculated");
+            ui.checkbox(&mut self.preview.layers.clean_v_bit, "V-bit cleanup")
+                .on_hover_text("Show the paths of the V-bit cleanup, once calculated");
+        });
     }
 
     fn gcode_view(&mut self, ui: &mut Ui) {
@@ -1116,21 +1189,114 @@ impl RengraveApp {
         }
         match self.gcode() {
             Ok(lines) => {
-                let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
                 let font = egui::TextStyle::Monospace.resolve(ui.style());
                 let dark = ui.visuals().dark_mode;
                 let plain = ui.visuals().text_color();
-                egui::ScrollArea::both().auto_shrink(false).show_rows(
-                    ui,
-                    row_height,
-                    lines.len(),
-                    |ui, range| {
-                        for line in &lines[range] {
-                            let job = Token::highlight(line, &font, dark, plain);
-                            ui.add(egui::Label::new(job).extend());
+                let current = self
+                    .gcode_galley
+                    .as_ref()
+                    .is_some_and(|c| Arc::ptr_eq(&c.lines, &lines) && c.dark == dark);
+                if !current {
+                    let mut text = String::new();
+                    let mut job = egui::text::LayoutJob::default();
+                    for line in lines.iter() {
+                        let highlighted = Token::highlight(line, &font, dark, plain);
+                        for section in &highlighted.sections {
+                            job.append(
+                                &highlighted.text
+                                    [section.byte_range.start.0..section.byte_range.end.0],
+                                0.0,
+                                section.format.clone(),
+                            );
                         }
-                    },
+                        job.append("\n", 0.0, egui::TextFormat::simple(font.clone(), plain));
+                        text.push_str(line);
+                        text.push('\n');
+                    }
+                    job.wrap.max_width = f32::INFINITY;
+                    self.gcode_galley = Some(GcodeGalley {
+                        lines: lines.clone(),
+                        dark,
+                        text: text.into(),
+                        galley: ui.painter().layout_job(job),
+                    });
+                }
+                let Some(GcodeGalley { text, galley, .. }) = &self.gcode_galley else {
+                    return;
+                };
+                let (text, galley) = (text.clone(), galley.clone());
+                let id = egui::Id::unique("gcode_text");
+                // egui moves the cursor on a right-click, so keep the selection through it.
+                let kept = ui
+                    .input(|i| i.pointer.secondary_pressed())
+                    .then(|| egui::TextEdit::load_state(ui.ctx(), id))
+                    .flatten()
+                    .and_then(|state| state.cursor.char_range());
+                if ui.input(|i| i.pointer.secondary_pressed()) {
+                    // The menu click clears the cursor, so remember what the menu will copy.
+                    self.gcode_selection = kept
+                        .filter(|range| !range.is_empty())
+                        .map(|range| range.slice_str(&text).to_owned())
+                        .unwrap_or_default();
+                }
+                // Line numbers are painted in a gutter beside the text. They are not part of the
+                // text, so they cannot be selected or copied.
+                let digits = lines.len().max(1).to_string().len().max(3);
+                let gutter_width = ui
+                    .painter()
+                    .layout_no_wrap("0".repeat(digits), font.clone(), plain)
+                    .size()
+                    .x
+                    + 16.0;
+                let full = ui.available_rect_before_wrap();
+                let (gutter, rest) = full.split_left_right_at_x(full.left() + gutter_width);
+                let gutter_painter = ui.painter().with_clip_rect(gutter);
+                let number_color = ui.visuals().weak_text_color();
+                gutter_painter.rect_filled(gutter, 0.0, ui.visuals().faint_bg_color);
+                gutter_painter.vline(
+                    gutter.right(),
+                    gutter.y_range(),
+                    ui.visuals().widgets.noninteractive.bg_stroke,
                 );
+                let line_count = lines.len();
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rest), |ui| {
+                    let width = ui.available_width().max(galley.size().x + 16.0);
+                    egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
+                        // A read-only buffer: it can be selected and copied, but not edited.
+                        let mut buffer: &str = &text;
+                        let mut layouter =
+                            |_: &Ui, _: &dyn egui::TextBuffer, _: f32| galley.clone();
+                        let output = egui::TextEdit::multiline(&mut buffer)
+                            .id(id)
+                            .layouter(&mut layouter)
+                            .desired_width(width)
+                            .frame(egui::Frame::NONE)
+                            .show(ui);
+                        if let Some(range) = kept
+                            && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id)
+                        {
+                            state.cursor.set_char_range(Some(range));
+                            state.store(ui.ctx(), id);
+                        }
+                        // Each line is one row of the galley, so the numbers follow the text.
+                        for (index, row) in output.galley.rows.iter().take(line_count).enumerate() {
+                            let y = output.galley_pos.y + row.pos.y;
+                            if y + row.height() < gutter.top() || y > gutter.bottom() {
+                                continue;
+                            }
+                            gutter_painter.text(
+                                egui::pos2(gutter.right() - 8.0, y),
+                                egui::Align2::RIGHT_TOP,
+                                index + 1,
+                                font.clone(),
+                                number_color,
+                            );
+                        }
+                        output
+                            .response
+                            .context_menu(|ui| self.gcode_context_menu(ui));
+                    });
+                });
             }
             Err(e) => {
                 ui.centered_and_justified(|ui| ui.colored_label(ui.visuals().error_fg_color, e));
@@ -1138,14 +1304,31 @@ impl RengraveApp {
         }
     }
 
+    fn gcode_context_menu(&mut self, ui: &mut Ui) {
+        if ui
+            .menu_item(!self.gcode_selection.is_empty(), icons::COPY, "Copy", None)
+            .clicked()
+        {
+            ui.ctx().copy_text(self.gcode_selection.clone());
+            ui.close();
+        }
+        if ui
+            .menu_item(self.can_write_gcode(), icons::COPY, "Copy all", None)
+            .clicked()
+        {
+            self.copy_gcode();
+            ui.close();
+        }
+    }
+
     fn about_window(&mut self, ui: &mut Ui) {
         let mut open = self.show_about;
-        egui::Window::new("About rengrave")
+        egui::Window::new("About Rengrave")
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
             .show(ui.ctx(), |ui| {
-                ui.label(format!("rengrave {}", env!("CARGO_PKG_VERSION")));
+                ui.label(format!("Rengrave {}", env!("CARGO_PKG_VERSION")));
                 ui.label("A Rust port of F-Engrave 1.78 by Scorch (scorchworks.com).");
                 ui.label("Licensed under the GNU GPL, version 3 or later.");
             });

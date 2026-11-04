@@ -50,7 +50,7 @@ them. MIT is compatible with distributing the whole under the GPL.
 
 ## Fonts bundled in the desktop application
 
-These files in `crates/rengrave_gui/assets/fonts/` are embedded unmodified in the `rengrave-gui`
+These files in `crates/rengrave_gui/assets/fonts/` are embedded unmodified in the `rengrave`
 binary. They are separate works under their own licenses, kept with their license texts. Both
 licenses permit bundling with a GPL program.
 

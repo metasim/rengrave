@@ -9,7 +9,7 @@ authors.workspace = true
 readme = "README.md"
 
 [[bin]]
-name = "rengrave-gui"
+name = "rengrave"
 path = "src/main.rs"
 
 [lib]
@@ -32,3 +32,11 @@ screenshots = ["egui_kittest/wgpu", "egui_kittest/snapshot"]
 
 [lints]
 workspace = true
+
+# Used by `cargo bundle --release -p rengrave_gui` to build a macOS `Rengrave.app`.
+[package.metadata.bundle]
+name = "Rengrave"
+identifier = "net.metasim.rengrave"
+short_description = "Engraving and V-carve G-code generator"
+category = "public.app-category.graphics-design"
+copyright = "Copyright 2026 Simeon H.K. Fitch. Licensed under GPL-3.0-or-later."

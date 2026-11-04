@@ -23,8 +23,6 @@ use warp_tools::{Tool, ToolShape};
 
 /// Assumed speed of rapid moves, in millimeters per minute.
 const RAPID_MM_PER_MIN: f64 = 3000.0;
-/// Grid cells along the longer side of the stock.
-const MAX_GRID_CELLS: f64 = 1024.0;
 /// Most grid cells across the radius of the tool; beyond this the grid is coarsened.
 const MAX_RADIUS_CELLS: f64 = 64.0;
 /// Number of stock snapshots kept for moving backward in time.
@@ -99,11 +97,27 @@ pub struct Simulation {
 }
 
 impl Simulation {
+    /// Grid cells along the longer side of the stock, unless the tool is large for it.
+    pub const DEFAULT_RESOLUTION: usize = 1024;
+
+    /// The finest resolution used, since the grid has one more point than cells and a texture
+    /// of 2048 points a side is the limit on some graphics hardware.
+    pub const MAX_RESOLUTION: usize = 2047;
+
+    /// The resolutions offered to the user, from fastest to finest.
+    pub const RESOLUTIONS: [usize; 3] = [512, 1024, 2048];
+
     /// Interprets a program and prepares untouched stock around `design`.
     ///
     /// `lines` is the program, as produced by [`crate::GcodeProgram::generate`]. Fails if the
     /// program cannot be interpreted, which can happen with a custom header or footer.
-    pub fn new(lines: &[String], design: &Design, settings: &Settings) -> Result<Self> {
+    /// `resolution` is the number of grid cells along the longer side of the stock.
+    pub fn new(
+        lines: &[String],
+        design: &Design,
+        settings: &Settings,
+        resolution: usize,
+    ) -> Result<Self> {
         let source = Self::preprocess(lines)?;
         let mut interpreter = Interpreter::default();
         let program = interpreter
@@ -150,7 +164,8 @@ impl Simulation {
         let tool_radius = tool.radius();
         let extent = Self::stock_extent(&moves, design, tool_radius);
         let longest = extent.width().max(extent.height()).max(1e-6);
-        let cell = (longest / MAX_GRID_CELLS).max(tool_radius / MAX_RADIUS_CELLS);
+        let cell = (longest / resolution.clamp(16, Self::MAX_RESOLUTION) as f64)
+            .max(tool_radius / MAX_RADIUS_CELLS);
         let bottom = deepest * 1.25 - longest * 0.01;
         let stock = Stock::new(
             DVec3::new(extent.min_x, extent.min_y, bottom),
@@ -546,7 +561,13 @@ mod tests {
         let job = job_with(font, settings);
         let (design, carve) = job.calculate(&Progress::none()).unwrap();
         let lines = GcodeProgram::generate(&design, carve.as_ref(), &job.settings).unwrap();
-        let mut sim = Simulation::new(&lines, &design, &job.settings).unwrap();
+        let mut sim = Simulation::new(
+            &lines,
+            &design,
+            &job.settings,
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         sim.run_to_end();
         (sim, design)
     }
@@ -597,7 +618,12 @@ mod tests {
 
     #[test]
     fn bad_programs_are_errors() {
-        let result = Simulation::new(&lines("G1 X$"), &plain_design(), &Settings::default());
+        let result = Simulation::new(
+            &lines("G1 X$"),
+            &plain_design(),
+            &Settings::default(),
+            Simulation::DEFAULT_RESOLUTION,
+        );
         assert!(matches!(result, Err(Error::Simulation(_))));
     }
 
@@ -616,8 +642,13 @@ mod tests {
                 cut_type: CutType::VCarve,
                 ..Settings::default()
             };
-            let mut sim = Simulation::new(&program, &plain_design(), &settings)
-                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let mut sim = Simulation::new(
+                &program,
+                &plain_design(),
+                &settings,
+                Simulation::DEFAULT_RESOLUTION,
+            )
+            .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             assert!(sim.total_seconds() > 0.0, "{}", path.display());
             sim.run_to_end();
             assert_eq!(sim.time(), sim.total_seconds());
@@ -640,7 +671,13 @@ mod tests {
     #[test]
     fn inch_programs_report_inches() {
         let program = lines("G20 G90\nF10\nG0 X1 Y2\nG1 X2 Y2");
-        let sim = Simulation::new(&program, &plain_design(), &Settings::default()).unwrap();
+        let sim = Simulation::new(
+            &program,
+            &plain_design(),
+            &Settings::default(),
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         let m = sim.moves().last().unwrap();
         assert_abs_diff_eq!(m.to[0], 2.0, epsilon = 1e-9);
         // One inch at ten inches per minute.
@@ -650,7 +687,13 @@ mod tests {
     #[test]
     fn metric_programs_report_millimeters() {
         let program = lines("G21 G90\nF60\nG1 X10");
-        let sim = Simulation::new(&program, &plain_design(), &Settings::default()).unwrap();
+        let sim = Simulation::new(
+            &program,
+            &plain_design(),
+            &Settings::default(),
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         assert_abs_diff_eq!(sim.moves()[0].to[0], 10.0, epsilon = 1e-9);
         assert_abs_diff_eq!(sim.total_seconds(), 10.0, epsilon = 1e-9);
     }
@@ -695,7 +738,13 @@ mod tests {
         let (design, carve) = job.calculate(&Progress::none()).unwrap();
         let carve = carve.unwrap();
         let program = GcodeProgram::generate(&design, Some(&carve), &job.settings).unwrap();
-        let mut sim = Simulation::new(&program, &design, &job.settings).unwrap();
+        let mut sim = Simulation::new(
+            &program,
+            &design,
+            &job.settings,
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         sim.run_to_end();
         let half: f64 = 30f64.to_radians();
         for p in &carve.points {
@@ -832,7 +881,13 @@ mod tests {
     #[test]
     fn time_advances_the_tool_along_a_move() {
         let program = lines("G21 G90\nF60\nG1 X10");
-        let mut sim = Simulation::new(&program, &plain_design(), &Settings::default()).unwrap();
+        let mut sim = Simulation::new(
+            &program,
+            &plain_design(),
+            &Settings::default(),
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         assert!(sim.advance_to(5.0, None));
         assert_abs_diff_eq!(sim.time(), 5.0, epsilon = 1e-9);
         assert_abs_diff_eq!(sim.tool_position()[0], 5.0, epsilon = 1e-9);
@@ -842,7 +897,13 @@ mod tests {
     #[test]
     fn inexact_targets_terminate_exactly_on_time() {
         let program = lines("G21 G90\nF61\nG1 X10.3 Y3.7\nG1 X1.1 Y9.9\nG1 X7");
-        let mut sim = Simulation::new(&program, &plain_design(), &Settings::default()).unwrap();
+        let mut sim = Simulation::new(
+            &program,
+            &plain_design(),
+            &Settings::default(),
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         let total = sim.total_seconds();
         for k in 0..200 {
             let target = total * f64::from(k) / 199.0 * 0.999_999_937;
@@ -886,7 +947,13 @@ mod tests {
         let job = job_with(square_font(), square_settings());
         let (design, carve) = job.calculate(&Progress::none()).unwrap();
         let program = GcodeProgram::generate(&design, carve.as_ref(), &job.settings).unwrap();
-        let mut sim = Simulation::new(&program, &design, &job.settings).unwrap();
+        let mut sim = Simulation::new(
+            &program,
+            &design,
+            &job.settings,
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         let total = sim.total_seconds();
         assert!(!sim.advance_to(total, Some(Duration::ZERO)));
         assert_eq!(sim.time(), 0.0);
@@ -905,7 +972,13 @@ mod tests {
             cut_type: CutType::VCarve,
             ..Settings::default()
         };
-        let mut sim = Simulation::new(&program, &plain_design(), &settings).unwrap();
+        let mut sim = Simulation::new(
+            &program,
+            &plain_design(),
+            &settings,
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         let (nx, ny) = sim.grid_size();
         let all = sim.take_dirty().unwrap();
         assert_eq!((all.max_i, all.max_j), (nx - 1, ny - 1));
@@ -937,7 +1010,13 @@ mod tests {
             stroke_thickness: 0.5,
             ..Settings::default()
         };
-        let mut sim = Simulation::new(&program, &plain_design(), &settings).unwrap();
+        let mut sim = Simulation::new(
+            &program,
+            &plain_design(),
+            &settings,
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         sim.run_to_end();
         assert_eq!(sim.rapid_cuts().len(), 1);
         assert_eq!(sim.rapid_cuts()[0].line, 4);
@@ -959,8 +1038,13 @@ mod tests {
 
     #[test]
     fn program_without_motion_is_harmless() {
-        let mut sim =
-            Simulation::new(&lines("G90\nM2"), &plain_design(), &Settings::default()).unwrap();
+        let mut sim = Simulation::new(
+            &lines("G90\nM2"),
+            &plain_design(),
+            &Settings::default(),
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         assert_eq!(sim.total_seconds(), 0.0);
         assert!(sim.advance_to(10.0, None));
         assert_eq!(sim.current_line(), None);
@@ -969,7 +1053,28 @@ mod tests {
     #[test]
     fn program_end_stops_interpretation() {
         let program = lines("G21\nF60\nG1 X1\nM2\nG1 X99");
-        let sim = Simulation::new(&program, &plain_design(), &Settings::default()).unwrap();
+        let sim = Simulation::new(
+            &program,
+            &plain_design(),
+            &Settings::default(),
+            Simulation::DEFAULT_RESOLUTION,
+        )
+        .unwrap();
         assert_eq!(sim.moves().len(), 1);
+    }
+
+    #[test]
+    fn resolution_sets_the_grid_size() {
+        let program = lines("G21 G90\nG0 X0 Y0\nG1 Z-1 F100\nG1 X10");
+        let size = |resolution| {
+            Simulation::new(&program, &plain_design(), &Settings::default(), resolution)
+                .unwrap()
+                .grid_size()
+        };
+        let (coarse, fine) = (size(512), size(2048));
+        assert!(
+            fine.0 > coarse.0 && fine.1 > coarse.1,
+            "{coarse:?} {fine:?}"
+        );
     }
 }

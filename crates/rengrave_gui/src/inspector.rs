@@ -8,7 +8,6 @@
 
 use crate::app::{RengraveApp, StatusLevel, Tab};
 use crate::icons;
-use crate::style::Look;
 use crate::widgets::{Form, Number, UiExt};
 use egui::{CollapsingHeader, Grid, Ui};
 use rengrave_core::{
@@ -33,10 +32,6 @@ impl RengraveApp {
         );
         ui.add_space(6.0);
 
-        // Reserve room for the fixed action area at the bottom.
-        egui::Panel::bottom("inspector_actions")
-            .frame(egui::Frame::NONE)
-            .show(ui, |ui| self.actions(ui));
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| match self.tab {
@@ -46,49 +41,32 @@ impl RengraveApp {
             });
     }
 
-    fn actions(&mut self, ui: &mut Ui) {
-        ui.add_space(6.0);
-        if self.settings.cut_type == CutType::VCarve {
-            ui.horizontal(|ui| {
-                let live = ui
-                    .checkbox(&mut self.live_carve, "Live V-carve")
-                    .on_hover_text(
-                        "Recalculate paths after every change. Turn off for very large designs.",
-                    );
-                if live.changed()
-                    && self.live_carve
-                    && self.carve_is_stale()
-                    && self.issues.is_empty()
-                {
-                    self.recalculate(true);
-                }
-                let can_calc = self.issues.is_empty();
-                if ui
-                    .icon_button(can_calc, icons::CALCULATE, "Calculate")
-                    .on_hover_text("Reload the source file and calculate V-carve paths now (F5)")
-                    .clicked()
-                {
-                    self.reload_and_recalculate();
-                }
-            });
+    /// The V-carve recalculation controls, which sit in the toolbar beside the view tabs.
+    pub(crate) fn carve_controls(&mut self, ui: &mut Ui) {
+        if self.settings.cut_type != CutType::VCarve {
+            return;
         }
-        let enabled = self.can_write_gcode();
-        let save = egui::Button::new((
-            Look::icon(icons::SAVE).color(ui.visuals().selection.stroke.color),
-            Look::bold("Save G-code…").color(ui.visuals().selection.stroke.color),
-        ))
-        .fill(ui.visuals().selection.bg_fill)
-        .min_size(egui::vec2(ui.available_width(), 30.0));
-        let response = ui.add_enabled(enabled, save);
-        response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, "Save G-code…"));
-        if response
-            .on_disabled_hover_text("Waiting for toolpaths, or settings need attention.")
-            .clicked()
-        {
-            self.save_gcode();
-        }
-        ui.add_space(6.0);
+        // Compact, so that the controls fit inside the height of the tabs.
+        ui.compact(|ui| {
+            // Laid out right to left, so the last control added is the leftmost.
+            // With Auto on, paths are always current, so there is nothing to refresh.
+            let can_refresh = self.issues.is_empty() && !self.live_carve;
+            if ui
+                .icon_button(can_refresh, icons::CALCULATE, "Refresh")
+                .on_hover_text("Reload the source file and calculate V-carve paths now (F5)")
+                .on_disabled_hover_text("Paths update automatically while Auto is on")
+                .clicked()
+            {
+                self.reload_and_recalculate();
+            }
+            let auto = ui.checkbox(&mut self.live_carve, "Auto").on_hover_text(
+                "Recalculate V-carve paths after every change. Turn off for very large designs.",
+            );
+            if auto.changed() && self.live_carve && self.carve_is_stale() && self.issues.is_empty()
+            {
+                self.recalculate(true);
+            }
+        });
     }
 
     fn design_tab(&mut self, ui: &mut Ui) {
@@ -208,19 +186,35 @@ impl RengraveApp {
                 || "No file selected".to_string(),
                 |n| n.to_string_lossy().into_owned(),
             );
-            ui.label(name);
-            if ui.icon_button(true, icons::OPEN, "Open…").clicked() {
-                self.open_image_dialog();
-            }
-            if ui
-                .icon_button(true, icons::CALCULATE, "Reload")
-                .on_hover_text("Read the file again, after changing it elsewhere (F5)")
-                .clicked()
-            {
-                self.reload_and_recalculate();
-            }
+            // Right to left, so that the file name takes whatever width the buttons leave.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .icon_button(true, icons::CALCULATE, "Reload")
+                    .on_hover_text("Read the file again, after changing it elsewhere (F5)")
+                    .clicked()
+                {
+                    self.reload_and_recalculate();
+                }
+                if ui
+                    .icon_button(true, icons::OPEN, "Open…")
+                    .on_hover_text(
+                        "DXF, PNG, BMP, PBM, JPEG, GIF, or TIFF. You can also drop a file on the window.",
+                    )
+                    .clicked()
+                {
+                    self.open_image_dialog();
+                }
+                // Read-only, so the name can be selected and copied but not edited.
+                ui.add(
+                    egui::TextEdit::singleline(&mut name.as_str())
+                        .desired_width(f32::INFINITY)
+                        .margin(egui::vec2(8.0, 6.0)),
+                )
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Image file")
+                });
+            });
         });
-        ui.weak("DXF, PNG, BMP, PBM, JPEG, GIF, or TIFF. You can also drop a file on the window.");
         CollapsingHeader::new(ui.section_heading("Bitmap tracing"))
             .show(ui, |ui| self.tracing_section(ui));
     }
@@ -414,22 +408,20 @@ impl RengraveApp {
     }
 
     fn position_section(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.label("Work origin")
+                .on_hover_text("Which point of the design is X0 Y0");
             ui.origin_grid(&mut self.settings.origin);
-            ui.vertical(|ui| {
-                ui.label(ui.control_label("Work origin"))
-                    .on_hover_text("Which point of the design is X0 Y0");
-                ui.radio_value(&mut self.settings.origin, Origin::Default, "Design origin")
-                    .on_hover_text("The start of the text baseline, or the origin of the file");
-                if self.settings.input_type == InputType::Text {
-                    ui.radio_value(
-                        &mut self.settings.origin,
-                        Origin::ArcCenter,
-                        "Circle center",
-                    )
-                    .on_hover_text("The center of the circle that text is placed on");
-                }
-            });
+            ui.radio_value(&mut self.settings.origin, Origin::Default, "Design origin")
+                .on_hover_text("The start of the text baseline, or the origin of the file");
+            if self.settings.input_type == InputType::Text {
+                ui.radio_value(
+                    &mut self.settings.origin,
+                    Origin::ArcCenter,
+                    "Circle center",
+                )
+                .on_hover_text("The center of the circle that text is placed on");
+            }
         });
         ui.add_space(4.0);
         let unit = self.unit();
@@ -439,7 +431,7 @@ impl RengraveApp {
             length_unit: unit,
         };
         let s = &mut self.settings;
-        ui.form_grid("position_grid", |ui| {
+        ui.compact_form_grid("position_grid", |ui| {
             form.length(
                 ui,
                 "X offset",
@@ -628,19 +620,45 @@ impl RengraveApp {
     }
 
     fn bit_section(&mut self, ui: &mut Ui) {
-        ui.segmented(
-            &mut self.settings.bit_shape,
-            &[
-                (BitShape::VBit, "V-bit", "A pointed conical bit"),
-                (BitShape::Ball, "Ball nose", "A ball-nose end mill"),
-                (
-                    BitShape::Flat,
-                    "Straight",
-                    "A flat end mill, which clears only where it fits",
-                ),
-            ],
-        );
-        ui.bit_profile(&self.settings);
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            // Fill the width, so that the box lines up with the controls below it.
+            ui.set_min_width(ui.available_width());
+            // A framed group does not center itself, so pad by half the room left over, using the
+            // width it had on the last frame.
+            let id = ui.scope_id().with("bit_choice_width");
+            let known: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
+            let room = ui.available_width();
+            let choice = ui
+                .horizontal(|ui| {
+                    // Without a known width, add nothing, so the panel is never pushed wider.
+                    if known > 0.0 {
+                        ui.add_space(((room - known) / 2.0).max(0.0));
+                    }
+                    ui.scope(|ui| {
+                        ui.segmented(
+                            &mut self.settings.bit_shape,
+                            &[
+                                (BitShape::VBit, "V-bit", "A pointed conical bit"),
+                                (BitShape::Ball, "Ball nose", "A ball-nose end mill"),
+                                (
+                                    BitShape::Flat,
+                                    "Straight",
+                                    "A flat end mill, which clears only where it fits",
+                                ),
+                            ],
+                        );
+                    })
+                    .response
+                })
+                .inner;
+            if (choice.rect.width() - known).abs() > 0.5 {
+                ui.data_mut(|d| d.insert_temp(id, choice.rect.width()));
+                ui.ctx().request_repaint();
+            }
+            ui.add_space(8.0);
+            ui.vertical_centered(|ui| ui.bit_profile(&self.settings));
+        });
+        ui.add_space(4.0);
         let unit = self.unit();
         let issues = self.issues.clone();
         let mut form = Form {

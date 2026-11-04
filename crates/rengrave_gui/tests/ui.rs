@@ -69,6 +69,8 @@ fn harness_with(settings: impl FnOnce(&mut Settings)) -> (Harness<'static, Rengr
     let dialogs = Box::new(answers.clone());
     let mut slot = Some(RengraveApp::new(egui::Context::default(), dialogs));
     if let Some(app) = slot.as_mut() {
+        // Most tests were written for inches, which also keeps the step small.
+        app.settings.set_units(Units::Inches);
         // Keep calculations small so that tests stay quick.
         app.settings.text = "Ab".into();
         app.settings.v_step_len = 0.03;
@@ -102,6 +104,55 @@ fn settle(harness: &mut Harness<'_, RengraveApp>) {
         );
         std::thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// The G-code text field, which holds the whole program as its value.
+fn gcode_field<'a>(harness: &'a Harness<'_, RengraveApp>) -> egui_kittest::Node<'a> {
+    harness
+        .get_all_by_role(egui::accesskit::Role::MultilineTextInput)
+        .find(|node| {
+            node.accesskit_node()
+                .value()
+                .is_some_and(|v| v.contains("G90\n"))
+        })
+        .expect("the G-code text field")
+}
+
+/// Right-clicks at `pos` with real pointer events.
+fn right_click_at(harness: &mut Harness<'_, RengraveApp>, pos: egui::Pos2) {
+    harness.hover_at(pos);
+    harness.run_steps(1);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(1);
+    }
+    harness.run_steps(2);
+}
+
+/// Left-clicks at `pos` with real pointer events.
+fn left_click_at(harness: &mut Harness<'_, RengraveApp>, pos: egui::Pos2) {
+    harness.hover_at(pos);
+    harness.run_steps(1);
+    harness.drag_at(pos);
+    harness.run_steps(1);
+    harness.drop_at(pos);
+    harness.run_steps(1);
+}
+
+/// Chooses Save G-code from the File menu, whose item also shows its shortcut.
+fn save_from_menu(harness: &mut Harness<'_, RengraveApp>) {
+    click(harness, "File");
+    harness
+        .get_all_by_label_contains("Save G-code…")
+        .next()
+        .expect("the menu item")
+        .click();
+    harness.run_steps(2);
 }
 
 fn click(harness: &mut Harness<'_, RengraveApp>, label: &str) {
@@ -224,7 +275,7 @@ fn tabs_are_exposed_as_tabs_and_report_the_selected_one() {
 fn tools_sit_below_the_tabs_inside_the_pane() {
     let (harness, _) = harness();
     let tabs = harness.get_by_label("Preview").rect();
-    let tool = harness.get_by_label("Grid").rect();
+    let tool = harness.get_by_label("Layers").rect();
     let canvas = harness.get_by_label("Design preview").rect();
     assert!(tool.top() >= tabs.bottom(), "{tool:?} under {tabs:?}");
     assert!(canvas.top() >= tool.bottom(), "{canvas:?} under {tool:?}");
@@ -252,9 +303,9 @@ fn panel_layout_is_stable_across_frames() {
 fn all_menus_open() {
     let (mut harness, _) = harness();
     for (menu, item) in [
-        ("File", "Export SVG…"),
+        ("File", "Export"),
         ("View", "Fit design"),
-        ("Help", "About rengrave"),
+        ("Help", "About Rengrave"),
     ] {
         click(&mut harness, menu);
         assert!(
@@ -267,10 +318,41 @@ fn all_menus_open() {
 }
 
 #[test]
+fn export_submenu_lists_the_drawing_formats() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "File");
+    click(&mut harness, "Export");
+    for item in ["SVG…", "DXF…", "DXF with closed loops…"] {
+        assert!(harness.query_by_label(item).is_some(), "{item}");
+    }
+}
+
+#[test]
+fn new_resets_the_settings_to_the_defaults() {
+    let (mut harness, _) = harness();
+    harness.state_mut().settings.text = "Changed".into();
+    harness.state_mut().settings.feed = 99.0;
+    click(&mut harness, "File");
+    harness
+        .get_all_by_label_contains("New")
+        .next()
+        .expect("the New menu item")
+        .click();
+    harness.run_steps(3);
+    // The harness starts from its own settings, so these are the application's defaults.
+    let settings = &harness.state().settings;
+    assert_eq!(settings.text, "F-engrave\nFan!");
+    assert_eq!(settings.justify, Justify::Center);
+    assert_eq!(settings.units, Units::Millimeters);
+    assert_eq!(settings.feed, 127.0);
+    assert_eq!(settings.y_scale, 25.4);
+}
+
+#[test]
 fn about_window_opens() {
     let (mut harness, _) = harness();
     click(&mut harness, "Help");
-    click(&mut harness, "About rengrave");
+    click(&mut harness, "About Rengrave");
     assert!(harness.query_by_label_contains("GNU GPL").is_some());
 }
 
@@ -369,7 +451,11 @@ fn opening_a_dxf_through_the_dialog_loads_it() {
     let app = harness.state();
     assert_eq!(app.settings.input_type, InputType::Image);
     assert!(!app.design().unwrap().segments.is_empty());
-    assert!(harness.query_by_label("drawing.dxf").is_some());
+    let field = harness.get_by_label("Image file");
+    assert_eq!(
+        field.accesskit_node().value().as_deref(),
+        Some("drawing.dxf")
+    );
 }
 
 #[test]
@@ -529,7 +615,7 @@ fn finish_stock_enables_pass_depth() {
 #[test]
 fn turning_off_live_carve_waits_for_calculate() {
     let (mut harness, _) = harness();
-    click(&mut harness, "Live V-carve");
+    click(&mut harness, "Auto");
     harness.get_by_label("Height").set_value_accesskit(0.5);
     harness.run_steps(2);
     settle(&mut harness);
@@ -539,7 +625,7 @@ fn turning_off_live_carve_waits_for_calculate() {
     assert!(!app.can_write_gcode());
     assert!(app.status().text.contains("F5"));
 
-    click(&mut harness, "Calculate");
+    click(&mut harness, "Refresh");
     settle(&mut harness);
     assert!(harness.state().carve().is_some());
     assert!(harness.state().can_write_gcode());
@@ -548,7 +634,7 @@ fn turning_off_live_carve_waits_for_calculate() {
 #[test]
 fn f5_recalculates_and_escape_cancels() {
     let (mut harness, _) = harness();
-    click(&mut harness, "Live V-carve");
+    click(&mut harness, "Auto");
     harness.get_by_label("Height").set_value_accesskit(0.5);
     harness.run_steps(2);
     settle(&mut harness);
@@ -649,7 +735,7 @@ fn save_button_writes_program_matching_core() {
     let path = dir.join("out.ngc");
     let (mut harness, answers) = harness();
     answers.answer_save(&path);
-    click(&mut harness, "Save G-code…");
+    save_from_menu(&mut harness);
     let saved = std::fs::read_to_string(&path).unwrap();
     assert!(saved.starts_with("G90\n"));
     assert!(harness.state().status().text.contains("Saved"));
@@ -669,7 +755,7 @@ fn save_button_writes_program_matching_core() {
 #[test]
 fn canceling_the_save_dialog_writes_nothing() {
     let (mut harness, _) = harness();
-    click(&mut harness, "Save G-code…");
+    save_from_menu(&mut harness);
     assert!(!harness.state().status().text.contains("Saved"));
 }
 
@@ -689,7 +775,7 @@ fn ctrl_s_saves() {
 fn write_failure_is_reported() {
     let (mut harness, answers) = harness();
     answers.answer_save(Path::new("/nonexistent-dir/out.ngc"));
-    click(&mut harness, "Save G-code…");
+    save_from_menu(&mut harness);
     let status = harness.state().status();
     assert_eq!(status.level, StatusLevel::Error);
     assert!(status.text.contains("Unable to write"));
@@ -747,19 +833,7 @@ fn file_menu_saves_gcode() {
     let path = dir.join("menu.ngc");
     let (mut harness, answers) = harness();
     answers.answer_save(&path);
-    click(&mut harness, "File");
-    let items: Vec<_> = harness.get_all_by_label_contains("Save G-code…").collect();
-    assert_eq!(items.len(), 2, "the panel button and the menu item");
-    items
-        .iter()
-        .find(|node| {
-            node.accesskit_node()
-                .label()
-                .is_some_and(|l| l != "Save G-code…")
-        })
-        .expect("the menu item shows its shortcut")
-        .click();
-    harness.run_steps(2);
+    save_from_menu(&mut harness);
     assert!(path.exists());
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -854,7 +928,7 @@ fn gcode_view_shows_program_text() {
     click(&mut harness, "G-code");
     harness.run_steps(2);
     assert_eq!(harness.state().active_view, ActiveView::Gcode);
-    assert!(harness.query_by_label("G90").is_some());
+    assert!(gcode_field(&harness).accesskit_node().value().is_some());
     harness.get_by_label("Copy").click();
     harness.run_steps(2);
     let copied = harness
@@ -868,6 +942,105 @@ fn gcode_view_shows_program_text() {
 }
 
 #[test]
+fn gcode_context_menu_copies_the_program() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "G-code");
+    harness.run_steps(2);
+    let rect = gcode_field(&harness).rect();
+    right_click_at(&mut harness, rect.left_top() + egui::vec2(12.0, 10.0));
+    harness.run_steps(3);
+    // Nothing is selected, so only the whole program can be copied.
+    let disabled = harness
+        .get_all_by_label("Copy")
+        .filter(|node| node.accesskit_node().is_disabled())
+        .count();
+    assert_eq!(disabled, 1, "only the menu's Copy is disabled");
+    harness.get_by_label("Copy all").click();
+    harness.run_steps(2);
+    let copied = harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .any(|c| matches!(c, egui::OutputCommand::CopyText(t) if t.starts_with("G90")))
+        || harness.state().status().text.contains("Copied");
+    assert!(copied);
+}
+
+#[test]
+fn select_all_and_copy_shortcut_copy_the_program() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "G-code");
+    harness.run_steps(2);
+    let rect = gcode_field(&harness).rect();
+    left_click_at(&mut harness, rect.left_top() + egui::vec2(12.0, 10.0));
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
+    harness.run_steps(2);
+    // egui-winit turns Ctrl+C (Cmd+C on macOS) into this event.
+    harness.event(egui::Event::Copy);
+    harness.run_steps(1);
+    let copied = harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            egui::OutputCommand::CopyText(t) => Some(t.clone()),
+            _ => None,
+        })
+        .expect("a copy command");
+    let program = harness.state_mut().gcode().unwrap().join("\n");
+    assert_eq!(copied.trim_end(), program.trim_end());
+}
+
+#[test]
+fn selection_survives_a_right_click() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "G-code");
+    harness.run_steps(2);
+    let rect = gcode_field(&harness).rect();
+    let start = rect.left_top() + egui::vec2(10.0, 10.0);
+    let end = rect.left_top() + egui::vec2(60.0, 10.0);
+    harness.hover_at(start);
+    harness.run_steps(1);
+    harness.drag_at(start);
+    harness.run_steps(1);
+    harness.hover_at(end);
+    harness.run_steps(2);
+    harness.drop_at(end);
+    harness.run_steps(1);
+    right_click_at(&mut harness, start + egui::vec2(20.0, 0.0));
+    let enabled = harness
+        .get_all_by_label("Copy")
+        .filter(|node| !node.accesskit_node().is_disabled())
+        .count();
+    assert_eq!(enabled, 2, "the toolbar's Copy and the menu's Copy");
+    // The menu's entry is the lower one, since the toolbar is at the top.
+    harness
+        .get_all_by_label("Copy")
+        .max_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .unwrap()
+        .click();
+    let mut copied = None;
+    for _ in 0..3 {
+        copied = copied.or_else(|| {
+            harness
+                .output()
+                .platform_output
+                .commands
+                .iter()
+                .find_map(|c| match c {
+                    egui::OutputCommand::CopyText(t) => Some(t.clone()),
+                    _ => None,
+                })
+        });
+        harness.step();
+    }
+    let copied = copied.expect("a copy command");
+    assert!(!copied.is_empty() && copied.len() < 20, "{copied:?}");
+}
+
+#[test]
 fn gcode_view_highlights_syntax_and_keeps_the_text() {
     let (mut harness, _) = harness_with(|s| s.no_comments = false);
     // Only visible rows are laid out, so make room for the settings block and the moves.
@@ -876,22 +1049,27 @@ fn gcode_view_highlights_syntax_and_keeps_the_text() {
     harness.run_steps(2);
 
     // The accessible text is unchanged, so highlighting does not affect screen readers.
-    assert!(harness.query_by_label("G90").is_some());
+    assert!(gcode_field(&harness).accesskit_node().value().is_some());
 
+    // The program is one text, so pick out the sections that lie within the line.
     let colors_of = |needle: &str| -> Vec<egui::Color32> {
         harness
             .output()
             .shapes
             .iter()
             .find_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(text) if text.galley.job.text.starts_with(needle) => Some(
-                    text.galley
-                        .job
-                        .sections
-                        .iter()
-                        .map(|s| s.format.color)
-                        .collect(),
-                ),
+                egui::Shape::Text(text) => {
+                    let job = &text.galley.job;
+                    let start = job.text.find(needle)?;
+                    let end = start + job.text[start..].find('\n')?;
+                    Some(
+                        job.sections
+                            .iter()
+                            .filter(|s| s.byte_range.start.0 >= start && s.byte_range.end.0 <= end)
+                            .map(|s| s.format.color)
+                            .collect(),
+                    )
+                }
                 _ => None,
             })
             .unwrap_or_else(|| panic!("no line starting with {needle}"))
@@ -998,6 +1176,14 @@ fn simulator_harness(settings: impl FnOnce(&mut Settings)) -> Harness<'static, R
     harness
 }
 
+/// The playback scrub bar, which is the slider that is not the relief control.
+fn scrub_bar<'a>(harness: &'a Harness<'_, RengraveApp>) -> egui_kittest::Node<'a> {
+    harness
+        .get_all_by_role(egui::accesskit::Role::Slider)
+        .find(|node| node.accesskit_node().label().as_deref() != Some("Relief"))
+        .expect("the scrub bar")
+}
+
 /// Steps until the stock has been cut up to the playback position.
 fn catch_up(harness: &mut Harness<'_, RengraveApp>) {
     let start = Instant::now();
@@ -1086,15 +1272,13 @@ fn scrub_bar_moves_playback_both_ways() {
         .simulation()
         .unwrap()
         .total_seconds();
-    let bar = harness.get_by_role(egui::accesskit::Role::Slider);
-    bar.set_value_accesskit(total * 0.5);
+    scrub_bar(&harness).set_value_accesskit(total * 0.5);
     harness.run_steps(1);
     catch_up(&mut harness);
     let middle = harness.state().simulator.simulation().unwrap().time();
     assert!((middle - total * 0.5).abs() < total * 0.01, "{middle}");
 
-    let bar = harness.get_by_role(egui::accesskit::Role::Slider);
-    bar.set_value_accesskit(total * 0.25);
+    scrub_bar(&harness).set_value_accesskit(total * 0.25);
     harness.run_steps(1);
     catch_up(&mut harness);
     let earlier = harness.state().simulator.simulation().unwrap().time();
@@ -1106,6 +1290,51 @@ fn speed_choice_applies() {
     let mut harness = simulator_harness(|_| {});
     click(&mut harness, "1000×");
     assert_eq!(harness.state().simulator.speed(), 1000.0);
+}
+
+#[test]
+fn resolution_choice_rebuilds_the_simulation_in_place() {
+    let mut harness = simulator_harness(|_| {});
+    let (coarse, _) = harness.state().simulator.simulation().unwrap().grid_size();
+    click(&mut harness, "Finish");
+    catch_up(&mut harness);
+    let finished = harness.state().simulator.position();
+    click(&mut harness, "Render");
+    harness.run_steps(2);
+    click(&mut harness, "2048");
+    harness.run_steps(3);
+    let view = &harness.state().simulator;
+    assert_eq!(view.resolution(), 2048);
+    let (fine, _) = view.simulation().unwrap().grid_size();
+    assert!(fine > coarse, "{fine} > {coarse}");
+    assert_eq!(view.position(), finished, "playback keeps its place");
+}
+
+#[test]
+fn relief_slider_changes_the_shading_strength() {
+    let mut harness = simulator_harness(|_| {});
+    assert_eq!(harness.state().simulator.relief(), 1.0);
+    click(&mut harness, "Render");
+    harness.run_steps(2);
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Slider, "Relief")
+        .set_value_accesskit(3.0);
+    harness.run_steps(2);
+    assert_eq!(harness.state().simulator.relief(), 3.0);
+}
+
+#[test]
+fn smooth_toggle_switches_texture_filtering() {
+    let mut harness = simulator_harness(|_| {});
+    assert!(harness.state().simulator.is_smooth());
+    click(&mut harness, "Render");
+    harness.run_steps(2);
+    click(&mut harness, "Smooth");
+    harness.run_steps(2);
+    assert!(!harness.state().simulator.is_smooth());
+    click(&mut harness, "Smooth");
+    harness.run_steps(2);
+    assert!(harness.state().simulator.is_smooth());
 }
 
 #[test]
@@ -1131,7 +1360,7 @@ fn changed_program_restarts_the_simulation() {
 #[test]
 fn simulator_waits_while_live_carve_is_off() {
     let mut harness = simulator_harness(|_| {});
-    click(&mut harness, "Live V-carve");
+    click(&mut harness, "Auto");
     harness.state_mut().settings.y_scale = 0.5;
     harness.run_steps(1);
     settle(&mut harness);
@@ -1182,6 +1411,8 @@ fn simulator_shares_pan_and_zoom_with_the_preview() {
     click(&mut harness, "Simulate");
     harness.run_steps(2);
     assert_eq!(harness.state().preview.transform.unwrap().scale, view.scale);
+    click(&mut harness, "Render");
+    harness.run_steps(2);
     click(&mut harness, "Path");
     harness.run_steps(2);
 }
@@ -1277,57 +1508,29 @@ fn hover_reports_design_coordinates() {
     assert!(harness.query_by_label_contains("  Y ").is_some());
 }
 
-/// Whether a stroked frame is drawn around the widget with the given accessible name.
-fn has_stroked_frame(harness: &Harness<'_, RengraveApp>, name: &str) -> bool {
-    let bounds = harness.get_by_label(name).rect();
-    harness
-        .output()
-        .shapes
-        .iter()
-        .any(|clipped| match &clipped.shape {
-            egui::Shape::Rect(rect) => {
-                rect.rect.expand(1.0).contains_rect(bounds)
-                    && bounds.expand(1.0).contains_rect(rect.rect)
-                    && rect.stroke.width > 0.0
-                    && rect.stroke.color.a() > 0
-            }
-            _ => false,
-        })
-}
-
 #[test]
-fn toggles_look_like_buttons_when_off() {
+fn layer_checkboxes_are_available_and_work() {
     let (mut harness, _) = harness();
-    for name in ["Area", "Path", "Grid"] {
-        assert!(has_stroked_frame(&harness, name), "{name} on");
-        click(&mut harness, name);
-        harness.remove_cursor();
-        harness.run_steps(2);
-        assert!(has_stroked_frame(&harness, name), "{name} off");
-    }
-
-    click(&mut harness, "Simulate");
-    harness.remove_cursor();
+    click(&mut harness, "Layers");
     harness.run_steps(2);
-    let toggled = |h: &Harness<'_, RengraveApp>| h.get_by_label("Path").accesskit_node().toggled();
-    assert_eq!(toggled(&harness), Some(egui::accesskit::Toggled::False));
-    assert!(has_stroked_frame(&harness, "Path"), "Simulate path off");
-    click(&mut harness, "Path");
-    assert_eq!(toggled(&harness), Some(egui::accesskit::Toggled::True));
-}
-
-#[test]
-fn layer_toggles_are_available_and_work() {
-    let (mut harness, _) = harness();
-    click(&mut harness, "Area");
+    click(&mut harness, "Carved area");
     assert!(!harness.state().settings.show_v_area);
-    click(&mut harness, "Path");
+    click(&mut harness, "Tool path");
     assert!(!harness.state().settings.show_v_path);
     click(&mut harness, "Grid");
     assert!(!harness.state().preview.layers.grid);
     // These are display settings, so they must not trigger recalculation.
     assert!(harness.state().carve().is_some());
     assert!(harness.state().is_idle());
+}
+
+#[test]
+fn view_menu_only_fits_the_design() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "View");
+    harness.run_steps(2);
+    assert!(harness.query_by_label_contains("Fit design").is_some());
+    assert!(harness.query_by_label("Grid").is_none());
 }
 
 #[test]
