@@ -1239,26 +1239,63 @@ impl RengraveApp {
                         .map(|range| range.slice_str(&text).to_owned())
                         .unwrap_or_default();
                 }
-                let width = ui.available_width().max(galley.size().x + 16.0);
-                egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-                    // A read-only buffer: it can be selected and copied, but not edited.
-                    let mut buffer: &str = &text;
-                    let mut layouter = |_: &Ui, _: &dyn egui::TextBuffer, _: f32| galley.clone();
-                    let output = egui::TextEdit::multiline(&mut buffer)
-                        .id(id)
-                        .layouter(&mut layouter)
-                        .desired_width(width)
-                        .frame(egui::Frame::NONE)
-                        .show(ui);
-                    if let Some(range) = kept
-                        && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id)
-                    {
-                        state.cursor.set_char_range(Some(range));
-                        state.store(ui.ctx(), id);
-                    }
-                    output
-                        .response
-                        .context_menu(|ui| self.gcode_context_menu(ui));
+                // Line numbers are painted in a gutter beside the text. They are not part of the
+                // text, so they cannot be selected or copied.
+                let digits = lines.len().max(1).to_string().len().max(3);
+                let gutter_width = ui
+                    .painter()
+                    .layout_no_wrap("0".repeat(digits), font.clone(), plain)
+                    .size()
+                    .x
+                    + 16.0;
+                let full = ui.available_rect_before_wrap();
+                let (gutter, rest) = full.split_left_right_at_x(full.left() + gutter_width);
+                let gutter_painter = ui.painter().with_clip_rect(gutter);
+                let number_color = ui.visuals().weak_text_color();
+                gutter_painter.rect_filled(gutter, 0.0, ui.visuals().faint_bg_color);
+                gutter_painter.vline(
+                    gutter.right(),
+                    gutter.y_range(),
+                    ui.visuals().widgets.noninteractive.bg_stroke,
+                );
+                let line_count = lines.len();
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rest), |ui| {
+                    let width = ui.available_width().max(galley.size().x + 16.0);
+                    egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
+                        // A read-only buffer: it can be selected and copied, but not edited.
+                        let mut buffer: &str = &text;
+                        let mut layouter =
+                            |_: &Ui, _: &dyn egui::TextBuffer, _: f32| galley.clone();
+                        let output = egui::TextEdit::multiline(&mut buffer)
+                            .id(id)
+                            .layouter(&mut layouter)
+                            .desired_width(width)
+                            .frame(egui::Frame::NONE)
+                            .show(ui);
+                        if let Some(range) = kept
+                            && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id)
+                        {
+                            state.cursor.set_char_range(Some(range));
+                            state.store(ui.ctx(), id);
+                        }
+                        // Each line is one row of the galley, so the numbers follow the text.
+                        for (index, row) in output.galley.rows.iter().take(line_count).enumerate() {
+                            let y = output.galley_pos.y + row.pos.y;
+                            if y + row.height() < gutter.top() || y > gutter.bottom() {
+                                continue;
+                            }
+                            gutter_painter.text(
+                                egui::pos2(gutter.right() - 8.0, y),
+                                egui::Align2::RIGHT_TOP,
+                                index + 1,
+                                font.clone(),
+                                number_color,
+                            );
+                        }
+                        output
+                            .response
+                            .context_menu(|ui| self.gcode_context_menu(ui));
+                    });
                 });
             }
             Err(e) => {
