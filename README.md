@@ -7,7 +7,7 @@ rengrave is a Rust port of [F-Engrave](https://www.scorchworks.com/Fengrave/feng
 by Scorch. The toolpath engine reproduces the original's G-code line for line across a suite of
 reference programs. It runs with no helper programs and needs no font files.
 
-![The rengrave desktop application showing a V-carve of the text "Rengrave V-Carve"](docs/images/design.png)
+![The rengrave desktop application showing a V-carve of the text "F-engrave Fan!"](docs/images/design.png)
 
 ## Features
 
@@ -54,7 +54,23 @@ The app is written to `target/release/bundle/osx/Rengrave.app`.
 
 The window shows the design, its carved area, and the tool path, recalculating after each change.
 Choose the text and font on the **Design** tab and the bit on the **Toolpath** tab, then choose
-**File ▸ Save G-code…**.
+**File ▸ Save G-code…**. The application starts in millimeters with the text "F-engrave" and
+"Fan!", and **File ▸ New** returns to that.
+
+To carve an image instead, choose **Image** under Source and open a DXF drawing or a bitmap. Here
+the PNG `angry-unicorn.png` is traced and V-carved:
+
+![An image of a unicorn, traced and shown as a V-carve](docs/images/image.png)
+
+The **Toolpath** tab sets the feeds, the bit, and optional multi-pass, inlay, and cleanup
+operations:
+
+![The Toolpath tab, with a V-bit selected](docs/images/toolpath.png)
+
+The **G-code** view shows the program with syntax highlighting. Select text and copy it, or use
+the **Copy** button to copy it all:
+
+![The G-code view](docs/images/output.png)
 
 | Action | Control |
 | --- | --- |
@@ -70,7 +86,9 @@ Choose the text and font on the **Design** tab and the bit on the **Toolpath** t
 The **Simulate** tab plays the G-code program and cuts into a model of the stock. Scrub in either
 direction, or press **Finish** to see the result. Run times are estimates that ignore acceleration.
 
-![The Simulate tab, part way through carving](docs/images/simulator.png)
+![The Simulate tab, part way through carving the text](docs/images/simulator.png)
+
+![The Simulate tab, part way through carving the unicorn](docs/images/image_simulator.png)
 
 A file path on the command line (`rengrave job.ngc`) opens that settings file, font, or image.
 

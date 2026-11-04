@@ -275,7 +275,7 @@ fn tabs_are_exposed_as_tabs_and_report_the_selected_one() {
 fn tools_sit_below_the_tabs_inside_the_pane() {
     let (harness, _) = harness();
     let tabs = harness.get_by_label("Preview").rect();
-    let tool = harness.get_by_label("Grid").rect();
+    let tool = harness.get_by_label("Layers").rect();
     let canvas = harness.get_by_label("Design preview").rect();
     assert!(tool.top() >= tabs.bottom(), "{tool:?} under {tabs:?}");
     assert!(canvas.top() >= tool.bottom(), "{canvas:?} under {tool:?}");
@@ -1299,6 +1299,8 @@ fn resolution_choice_rebuilds_the_simulation_in_place() {
     click(&mut harness, "Finish");
     catch_up(&mut harness);
     let finished = harness.state().simulator.position();
+    click(&mut harness, "Render");
+    harness.run_steps(2);
     click(&mut harness, "2048");
     harness.run_steps(3);
     let view = &harness.state().simulator;
@@ -1312,6 +1314,8 @@ fn resolution_choice_rebuilds_the_simulation_in_place() {
 fn relief_slider_changes_the_shading_strength() {
     let mut harness = simulator_harness(|_| {});
     assert_eq!(harness.state().simulator.relief(), 1.0);
+    click(&mut harness, "Render");
+    harness.run_steps(2);
     harness
         .get_by_role_and_label(egui::accesskit::Role::Slider, "Relief")
         .set_value_accesskit(3.0);
@@ -1323,6 +1327,8 @@ fn relief_slider_changes_the_shading_strength() {
 fn smooth_toggle_switches_texture_filtering() {
     let mut harness = simulator_harness(|_| {});
     assert!(harness.state().simulator.is_smooth());
+    click(&mut harness, "Render");
+    harness.run_steps(2);
     click(&mut harness, "Smooth");
     harness.run_steps(2);
     assert!(!harness.state().simulator.is_smooth());
@@ -1405,6 +1411,8 @@ fn simulator_shares_pan_and_zoom_with_the_preview() {
     click(&mut harness, "Simulate");
     harness.run_steps(2);
     assert_eq!(harness.state().preview.transform.unwrap().scale, view.scale);
+    click(&mut harness, "Render");
+    harness.run_steps(2);
     click(&mut harness, "Path");
     harness.run_steps(2);
 }
@@ -1500,57 +1508,29 @@ fn hover_reports_design_coordinates() {
     assert!(harness.query_by_label_contains("  Y ").is_some());
 }
 
-/// Whether a stroked frame is drawn around the widget with the given accessible name.
-fn has_stroked_frame(harness: &Harness<'_, RengraveApp>, name: &str) -> bool {
-    let bounds = harness.get_by_label(name).rect();
-    harness
-        .output()
-        .shapes
-        .iter()
-        .any(|clipped| match &clipped.shape {
-            egui::Shape::Rect(rect) => {
-                rect.rect.expand(1.0).contains_rect(bounds)
-                    && bounds.expand(1.0).contains_rect(rect.rect)
-                    && rect.stroke.width > 0.0
-                    && rect.stroke.color.a() > 0
-            }
-            _ => false,
-        })
-}
-
 #[test]
-fn toggles_look_like_buttons_when_off() {
+fn layer_checkboxes_are_available_and_work() {
     let (mut harness, _) = harness();
-    for name in ["Area", "Path", "Grid"] {
-        assert!(has_stroked_frame(&harness, name), "{name} on");
-        click(&mut harness, name);
-        harness.remove_cursor();
-        harness.run_steps(2);
-        assert!(has_stroked_frame(&harness, name), "{name} off");
-    }
-
-    click(&mut harness, "Simulate");
-    harness.remove_cursor();
+    click(&mut harness, "Layers");
     harness.run_steps(2);
-    let toggled = |h: &Harness<'_, RengraveApp>| h.get_by_label("Path").accesskit_node().toggled();
-    assert_eq!(toggled(&harness), Some(egui::accesskit::Toggled::False));
-    assert!(has_stroked_frame(&harness, "Path"), "Simulate path off");
-    click(&mut harness, "Path");
-    assert_eq!(toggled(&harness), Some(egui::accesskit::Toggled::True));
-}
-
-#[test]
-fn layer_toggles_are_available_and_work() {
-    let (mut harness, _) = harness();
-    click(&mut harness, "Area");
+    click(&mut harness, "Carved area");
     assert!(!harness.state().settings.show_v_area);
-    click(&mut harness, "Path");
+    click(&mut harness, "Tool path");
     assert!(!harness.state().settings.show_v_path);
     click(&mut harness, "Grid");
     assert!(!harness.state().preview.layers.grid);
     // These are display settings, so they must not trigger recalculation.
     assert!(harness.state().carve().is_some());
     assert!(harness.state().is_idle());
+}
+
+#[test]
+fn view_menu_only_fits_the_design() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "View");
+    harness.run_steps(2);
+    assert!(harness.query_by_label_contains("Fit design").is_some());
+    assert!(harness.query_by_label("Grid").is_none());
 }
 
 #[test]
