@@ -18,15 +18,16 @@
 //!
 //! [`Job::generate_gcode`] runs stages 2 through 4 in one call:
 //!
-//! ```
-//! use rengrave_core::{CutType, Job, Progress, Settings};
+//! ```no_run
+//! use rengrave_core::{CutType, FontCatalog, Job, Progress, Settings};
 //!
 //! let settings = Settings {
 //!     text: "Hi".into(),
 //!     cut_type: CutType::VCarve,
 //!     ..Settings::default()
 //! };
-//! let job = Job::load(settings)?;
+//! let fonts = FontCatalog::with_system_fonts();
+//! let job = Job::load(settings, &fonts)?;
 //! let gcode = job.generate_gcode(&Progress::none())?;
 //! assert!(gcode.iter().any(|line| line.starts_with("G1 ")));
 //! # Ok::<(), rengrave_core::Error>(())
@@ -34,6 +35,7 @@
 
 #![warn(missing_docs)]
 
+pub mod catalog;
 pub mod cleanup;
 pub mod design;
 pub mod dxf;
@@ -48,12 +50,14 @@ pub mod settings;
 pub mod simulate;
 pub mod sort;
 pub mod trace;
+pub mod unicode_blocks;
 pub mod vcarve;
 
+pub use catalog::{FontCatalog, FontRef, UserFont};
 pub use cleanup::CleanupPaths;
 pub use design::Design;
 pub use error::{Error, Result};
-pub use font::{BuiltinFont, Font};
+pub use font::Font;
 pub use gcode::GcodeProgram;
 pub use job::Job;
 pub use progress::Progress;

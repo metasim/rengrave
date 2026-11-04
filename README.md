@@ -5,7 +5,7 @@ application.
 
 rengrave is a Rust port of [F-Engrave](https://www.scorchworks.com/Fengrave/fengrave.html) 1.78
 by Scorch. The toolpath engine reproduces the original's G-code line for line across a suite of
-reference programs. It runs with no helper programs and needs no font files.
+reference programs. It runs with no helper programs and uses the fonts installed on your computer.
 
 ![The rengrave desktop application showing a V-carve of the text "F-engrave Fan!"](docs/images/design.png)
 
@@ -14,15 +14,16 @@ reference programs. It runs with no helper programs and needs no font files.
 - **V-carving** with V-bits, ball-nose bits, and straight bits, including multi-pass roughing,
   depth limits, and prismatic cuts for inlays
 - **Engraving** of outlines at constant depth
-- **Text** in CXF stroke fonts, TrueType and OpenType fonts, or the two built-in typefaces, with
-  justification, spacing, rotation, mirroring, and placement on a circle
+- **Text** in any installed font, or in CXF stroke fonts and TrueType/OpenType files you add to
+  your font library, with justification, spacing, rotation, mirroring, and placement on a circle
 - **Images**: DXF drawings, plus PNG, BMP, PBM/PGM/PPM, JPEG, GIF, and TIFF bitmaps through a
   built-in tracer or `potrace`
 - **Cleanup operations** that clear flat regions with a straight bit and tidy edges with a V-bit
 - **Output** as G-code with optional arc fitting (`I`/`J` or `R`), plus SVG and DXF outlines
 - **Simulation** of the G-code program, showing the tool moving and the carved result
-- **Settings files** compatible with F-Engrave's `fengrave_set` format, including settings
-  embedded in its G-code
+- **Settings files** in the `fengrave_set` format, including settings embedded in the G-code.
+  They name the font as `system:<family>` or `user:<name>`, so they are not interchangeable with
+  F-Engrave's, which names a font file
 
 ## Getting started
 
@@ -94,7 +95,7 @@ A file path on the command line (`rengrave job.ngc`) opens that settings file, f
 
 ### Command line
 
-V-carve some text with a built-in font, in millimeters:
+V-carve some text in the default system font, in millimeters:
 
 ```bash
 rengrave-cli gcode --text "Hello" --mode v-carve --units mm --height 25 --bit-dia 12.7 --output hello.ngc
@@ -106,10 +107,15 @@ V-carve a drawing, centered on the origin:
 rengrave-cli gcode --image logo.dxf --mode v-carve --height 2 --origin mid-center --output logo.ngc
 ```
 
-Use a font file, and two lines of centered text (`|` starts a new line):
+Use an installed font, or a font file for this run only, with two lines of centered text (`|`
+starts a new line):
 
 ```bash
-rengrave-cli gcode --font /path/to/font.ttf --text "One|Two" --justify center --mode v-carve --output two.ngc
+rengrave-cli gcode --font "system:Helvetica" --text "One|Two" --justify center --mode v-carve --output two.ngc
+```
+
+```bash
+rengrave-cli gcode --font-file /path/to/font.ttf --text "One|Two" --justify center --mode v-carve --output two.ngc
 ```
 
 Write the job's settings, then reuse them:
@@ -131,7 +137,7 @@ The commands are:
 | `svg` | The outline as SVG |
 | `dxf` | The outline as DXF (`--close-loops` stitches open chains) |
 | `settings` | A settings file |
-| `fonts` | A list of built-in fonts, and of those in a directory |
+| `fonts` | A list of installed fonts, or a description of one font file |
 
 Output goes to standard output unless `--output` is given. `rengrave-cli gcode --help` lists every
 option. Any setting without its own option can be set by its settings-file name, as in

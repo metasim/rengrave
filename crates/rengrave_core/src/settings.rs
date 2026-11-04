@@ -11,6 +11,7 @@
 //! `(fengrave_set NAME VALUE)` comment format, so settings files and G-code produced by
 //! F-Engrave can be loaded and the other way around.
 
+use crate::catalog::FontRef;
 use crate::geom::round_significant;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -263,14 +264,10 @@ pub struct Settings {
     pub input_type: InputType,
     /// The text to engrave; `\n` separates lines.
     pub text: String,
-    /// Directory containing font files.
-    pub font_dir: PathBuf,
-    /// Font file name within `font_dir`, or a built-in font name. Empty uses the default.
-    pub font_file: String,
+    /// The font for text input.
+    pub font: FontRef,
     /// Image or DXF file for image input.
     pub image_file: PathBuf,
-    /// Load every code point of a font instead of Latin-1 only.
-    pub extended_chars: bool,
     /// Lay out every character of the font instead of `text`.
     pub show_font_index: bool,
 
@@ -418,10 +415,8 @@ impl Default for Settings {
         Self {
             input_type: InputType::Text,
             text: "F-Engrave".into(),
-            font_dir: PathBuf::from("fonts"),
-            font_file: String::new(),
+            font: FontRef::Default,
             image_file: PathBuf::new(),
-            extended_chars: false,
             show_font_index: false,
             y_scale: 2.0,
             x_scale: 100.0,
@@ -959,7 +954,6 @@ impl Settings {
         set("inlay", flag(self.inlay).to_string());
         set("bmp_long", flag(self.bmp_long_curve).to_string());
         set("var_dis", flag(self.disable_variables).to_string());
-        set("ext_char", flag(self.extended_chars).to_string());
         set("useIMGsize", flag(self.use_image_size).to_string());
         set("no_comments", flag(self.no_comments).to_string());
         set("plotbox", flag(self.add_box).to_string());
@@ -985,7 +979,7 @@ impl Settings {
         set("accuracy", self.accuracy.to_string());
         set("FEED", self.feed.to_string());
         set("PLUNGE", self.plunge.to_string());
-        set("fontfile", format!("\"{}\"", self.font_file));
+        set("font", format!("\"{}\"", self.font));
         set("H_CALC", self.height_calc.to_string());
         set("boxgap", self.box_gap.to_string());
         set("cut_type", self.cut_type.to_string());
@@ -1004,7 +998,6 @@ impl Settings {
         set("bmp_turds", self.bmp_turd_size.to_string());
         set("bmp_alpha", self.bmp_alpha_max.to_string());
         set("bmp_optto", self.bmp_opt_tolerance.to_string());
-        set("fontdir", format!("\"{}\"", self.font_dir.display()));
         set("gpre", self.g_pre.clone());
         set("gpost", self.g_post.clone());
         set("imagefile", format!("\"{}\"", self.image_file.display()));
@@ -1112,7 +1105,8 @@ impl Settings {
             "inlay" => self.inlay = flag(value)?,
             "bmp_long" => self.bmp_long_curve = flag(value)?,
             "var_dis" => self.disable_variables = flag(value)?,
-            "ext_char" => self.extended_chars = flag(value)?,
+            // Settings written by F-Engrave name font files, which this program does not use.
+            "ext_char" | "fontfile" | "fontdir" => {}
             "useIMGsize" => self.use_image_size = flag(value)?,
             "no_comments" => self.no_comments = flag(value)?,
             "plotbox" => {
@@ -1148,7 +1142,7 @@ impl Settings {
             "accuracy" => self.accuracy = num(value)?,
             "FEED" => self.feed = num(value)?,
             "PLUNGE" => self.plunge = num(value)?,
-            "fontfile" => self.font_file = quoted(value).to_string(),
+            "font" => self.font = quoted(value).parse()?,
             "H_CALC" => self.height_calc = value.parse()?,
             "boxgap" => self.box_gap = num(value)?,
             "cut_type" => self.cut_type = value.parse()?,
@@ -1167,7 +1161,6 @@ impl Settings {
             "bmp_turds" => self.bmp_turd_size = num(value)?,
             "bmp_alpha" => self.bmp_alpha_max = num(value)?,
             "bmp_optto" => self.bmp_opt_tolerance = num(value)?,
-            "fontdir" => self.font_dir = PathBuf::from(quoted(value)),
             "gpre" => self.g_pre = value.to_string(),
             "gpost" => self.g_post = value.to_string(),
             "imagefile" => self.image_file = PathBuf::from(quoted(value)),
@@ -1599,8 +1592,7 @@ mod tests {
     fn settings_round_trip() {
         let original = Settings {
             text: "Héllo\nWörld, a long string of text".into(),
-            font_file: "some font.ttf".into(),
-            font_dir: PathBuf::from("/a b/c"),
+            font: FontRef::System("Some Font".into()),
             image_file: PathBuf::from("/x/y z.dxf"),
             input_type: InputType::Image,
             cut_type: CutType::VCarve,

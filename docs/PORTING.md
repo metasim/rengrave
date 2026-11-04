@@ -66,7 +66,7 @@ checked by geometric properties and unit tests instead:
   surrounding logic follows the original closely, but this is the least-proven area of the port;
   check cleanup paths in a viewer before cutting.
 - **TrueType layout.** The reference programs use a CXF font, because the original needs its C++
-  helper for TrueType. Tests verify scale, closure, and contour direction of `ttf-parser` outlines.
+  helper for TrueType. Tests verify scale, closure, and contour direction of `skrifa` outlines.
 - **Bitmap tracing.** The native tracer is new code, and it is not the same algorithm as `potrace`.
   Its results are smooth but less refined. `potrace` integration has not been run against a real
   `potrace` binary, which was not available during development.

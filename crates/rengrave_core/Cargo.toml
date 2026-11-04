@@ -8,12 +8,17 @@ repository.workspace = true
 authors.workspace = true
 readme = "README.md"
 
+[features]
+default = ["system-fonts"]
+# Lists and loads the fonts installed on the machine.
+system-fonts = ["dep:fontique"]
+
 [dependencies]
 thiserror.workspace = true
 clipper2-rust.workspace = true
 skrifa.workspace = true
 image.workspace = true
-epaint_default_fonts.workspace = true
+fontique = { workspace = true, optional = true }
 glam = "0.34"
 warp-gcode = { path = "../../vendor/warp-gcode" }
 warp-sim = { path = "../../vendor/warp-sim" }
@@ -21,6 +26,7 @@ warp-tools = { path = "../../vendor/warp-tools" }
 
 [dev-dependencies]
 approx.workspace = true
+epaint_default_fonts.workspace = true
 
 [lints]
 workspace = true
