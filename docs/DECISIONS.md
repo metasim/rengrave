@@ -13,10 +13,10 @@ without a clean-room rewrite.*
 ## D2. Crate layout and branch
 
 Three crates as suggested, under `crates/`: `rengrave_core`, `rengrave_cli` (binary
-`rengrave`), and `rengrave_gui` (binary `rengrave-gui`). The stub root package created by
-`cargo new` was replaced by a virtual workspace. Work is on `feature/rust-port`; the
-repository had no commits, and no remote is configured, so no PR has been opened. The source
-archive `F-Engrave-1.78_src.zip` is ignored rather than committed, since it is reference
+`rengrave-cli`), and `rengrave_gui` (binary `rengrave`). The stub root package created by
+`cargo new` was replaced by a virtual workspace. The binaries were first named `rengrave` and
+`rengrave-gui`; they were renamed so that the application has the plain name. See D17 for the
+repository's branches. The source archive `F-Engrave-1.78_src.zip` is ignored rather than committed, since it is reference
 material available from the upstream site.
 
 ## D3. Polygon clipping: `clipper2-rust`
@@ -37,7 +37,7 @@ licensing mistake.
 
 The distribution ships no fonts, and without one the program cannot produce anything. The
 port embeds the Ubuntu Light and Hack typefaces through the `epaint_default_fonts` crate
-(already in the GUI's dependency tree) so that `rengrave gcode --text Hello` works with zero
+(already in the GUI's dependency tree) so that `rengrave-cli gcode --text Hello` works with zero
 setup. CXF stroke fonts and TTF/OTF files are loaded the same way as in the original.
 
 ## D6. Bitmap tracing: native tracer, with potrace optional
@@ -87,15 +87,20 @@ from a settings file no longer gain a trailing space.
 
 The review in [UX_REVIEW.md](UX_REVIEW.md) led to one window with tabs in place of the original's
 modal dialogs, automatic recalculation in place of the Recalculate button, and a background
-calculation in place of the modal progress window. *Open question for the owner:* whether **Live
-V-carve** should default to on. It is on, because the engine is fast enough for typical designs and
+calculation in place of the modal progress window. The **Auto** toggle (first named "Live V-carve")
+turns recalculation on or off, and **Refresh** recalculates by hand, so it is disabled while Auto
+is on. *Open question for the owner:* whether **Auto** should default to on. It is on, because the engine is fast enough for typical designs and
 canceling is immediate.
 
 ## D10. Defaults
 
-`Settings::default()` keeps the original's defaults (engraving, inches), except for what D13 changes
-for FluidNC, so settings files and the command line behave as existing users expect. The desktop application starts on a one-inch V-carve,
-because V-carving is the program's main purpose. Settings persist between sessions.
+`Settings::default()` keeps the original's defaults (engraving, inches, left-justified), except for
+what D13 changes for FluidNC, so settings files and the command line behave as existing users
+expect. The desktop application starts on a V-carve in millimeters, because V-carving is the
+program's main purpose. The text is "F-engrave" over "Fan!", center-justified, so the first view
+shows more than one line. The height is one inch, converted to 25.4 mm. **File ▸ New** returns to
+these defaults. The application saves its settings when it closes and restores them on the next
+start, so the defaults apply only to a first run or after File ▸ New.
 
 ## D11. Features not ported
 
@@ -103,11 +108,11 @@ because V-carving is the program's main purpose. Settings persist between sessio
 - Running as a LinuxCNC AXIS filter (`Write to Axis`).
 - `(fengrave_set v_pplot ...)` is accepted but ignored.
 
-## D12. Repository state
+## D12. Repository state at the start
 
-The repository had no remote or commits at the start, so there is no pull request. All work is on
-the branch `feature/rust-port`. The unborn `master` was never committed to, and the owner's default
-branch name, `main`, has not been created.
+The repository had no remote or commits at the start, so there was no pull request. The first work
+was on the branch `feature/rust-port`, and the unborn `master` was never committed to. This is
+superseded by D17.
 
 ## D13. FluidNC is the target controller
 
@@ -139,8 +144,9 @@ the desktop application alike. Program output was reviewed against FluidNC's `GC
   inches, rounding could in the worst case reach about 0.005 mm on very small arcs. Output in
   millimeters is not close to this limit. Prefer millimeters or `Lines` if such an error appears.
 
-*Open question for the owner:* the spindle speed `S3000` and the inch units and 5 in/min feed are
-still the original's defaults. FluidNC accepts them, but they may not suit the machine.
+*Open question for the owner:* the spindle speed `S3000` and the 5 in/min feed (127 mm/min in the
+desktop application) are still the original's defaults, and the command line still uses inches.
+FluidNC accepts them, but they may not suit the machine.
 
 ## D14. Toolpath simulator
 
@@ -154,7 +160,9 @@ to animate; and `fluidSender`'s `fluid-sim` emulates the protocol, with no mater
 - **Reads the emitted G-code,** not the internal toolpath, so it shows what a machine receives, and
   gives engraving and V-carving one code path. A test confirms the surface agrees with the internal
   tool positions.
-- **Top-down shaded view first.** *Open question:* a 3D view could be added later.
+- **Top-down shaded view first.** A **Render** menu in the toolbar sets the grid resolution (the grid is at most 2047
+  cells on a side, to fit the largest texture), the relief shading, and smoothing. *Open question:*
+  a 3D view could be added later.
 - **Constant-feed timing,** with an assumed rapid rate, and no acceleration. Run times are labeled
   as estimates. *Open question:* realistic timing would need FluidNC's acceleration settings, and
   `swarf-motion` could provide it.
@@ -214,3 +222,38 @@ because `egui_kittest` draws into a different context than the one given to `new
   to a widget first. The assertions are unchanged.
 - **Simulate toolbar wraps** onto a second line when the window is narrow, because the padded
   buttons no longer fit in 760 pixels.
+
+## D17. Application name, bundling, and branches
+
+- **Name.** The window title, the About box, and the macOS application menu say "Rengrave". The
+  binaries are `rengrave-cli` and `rengrave` (see D2).
+- **macOS bundle.** `cargo bundle --release`, run in `crates/rengrave_gui`, builds `Rengrave.app`
+  from `[package.metadata.bundle]`, with the identifier `net.metasim.rengrave`. The bundle has no
+  icon and is not signed or notarized, so Gatekeeper will ask before it opens. *Open question:*
+  whether to add an icon, and signing if the app is shared.
+- **Branches.** The repository now has a remote, `origin`. `main` holds only the initial commit and
+  receives work through pull requests, with `develop` as the integration branch. Nothing from the
+  port has reached `main`.
+
+## D18. Desktop interface changes after D16
+
+- **Origin controls.** The work origin is a labeled 3x3 grid, with the Design origin and Circle
+  center options below it, all in one thinly stroked panel. The earlier layout did not show what the
+  choice was among.
+- **Popovers for rarely used controls.** The Preview's **Layers** popover and the Simulate view's
+  **Render** popover hold the display options as checkboxes, with the Simulate resolution and relief.
+  They replace the Area, Path, Grid, and Smooth toggle buttons and the checkboxes that were in the
+  View menu, which now has only Fit design. A popover stays open while its controls are used. The
+  display options are not saved between sessions, except for the layer settings stored with the job.
+- **G-code view.** The G-code is a read-only text field, so selection, `Ctrl`+`C`, double and triple
+  click, select-all, and the context menu come from egui and not from custom code. A first version
+  used a custom selection, and was dropped because egui clears a label's selection on any mouse
+  press, including the right click that opens the menu. The **Copy** button floats over the text
+  rather than taking a row of its own. There is no separate Save G-code button; saving is in the File
+  menu.
+- **Export.** The SVG, DXF, and DXF-with-closed-loops outputs are grouped under **File ▸ Export**.
+  Saving settings and G-code stay directly on the File menu.
+- **Image file name.** The name is a read-only field beside the **Open…** button, and the hint
+  about dropping a file is that button's tooltip.
+- **Bit group.** The bit choice and its profile are in one centered box. The profile drawing is
+  filled and hatched to show the cut.

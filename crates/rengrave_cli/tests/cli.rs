@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn rengrave(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rengrave"))
+    Command::new(env!("CARGO_BIN_EXE_rengrave-cli"))
         .args(args)
         .output()
         .expect("binary runs")

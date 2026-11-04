@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 #[derive(Parser)]
 #[command(
-    name = "rengrave",
+    name = "rengrave-cli",
     version,
     about = "Generate engraving and V-carve G-code from text and images",
     long_about = "Generate engraving and V-carve G-code from text and images.\n\n\
@@ -557,7 +557,7 @@ mod tests {
     use clap::CommandFactory;
 
     fn job_args(args: &[&str]) -> JobArgs {
-        let mut full = vec!["rengrave", "gcode"];
+        let mut full = vec!["rengrave-cli", "gcode"];
         full.extend_from_slice(args);
         match Cli::parse_from(full).command {
             Command::Gcode(out) => out.job,
