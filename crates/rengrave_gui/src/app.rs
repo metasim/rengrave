@@ -966,15 +966,6 @@ impl RengraveApp {
                         self.preview.fit();
                         ui.close();
                     }
-                    ui.separator();
-                    ui.checkbox(&mut self.preview.layers.grid, "Grid");
-                    ui.checkbox(&mut self.settings.show_axis, "Origin axes");
-                    ui.checkbox(&mut self.settings.show_box, "Bounding box");
-                    ui.checkbox(&mut self.settings.show_thick, "Line thickness");
-                    ui.checkbox(&mut self.settings.show_v_area, "Carved area");
-                    ui.checkbox(&mut self.settings.show_v_path, "Tool path");
-                    ui.checkbox(&mut self.preview.layers.clean_straight, "Straight cleanup");
-                    ui.checkbox(&mut self.preview.layers.clean_v_bit, "V-bit cleanup");
                 });
                 ui.menu_button("Help", |ui| {
                     if ui
@@ -1162,13 +1153,29 @@ impl RengraveApp {
 
     fn preview_toolbar(&mut self, ui: &mut Ui) {
         self.fit_button(ui);
-        if self.settings.cut_type == CutType::VCarve {
-            ui.toggle_button(&mut self.settings.show_v_area, "Area")
-                .on_hover_text("Show the area cut by the V-bit");
-            ui.toggle_button(&mut self.settings.show_v_path, "Path")
-                .on_hover_text("Show the path of the tool");
-        }
-        ui.toggle_button(&mut self.preview.layers.grid, "Grid");
+        ui.separator();
+        ui.options_menu("Layers", "What the preview shows", |ui| {
+            if self.settings.cut_type == CutType::VCarve {
+                ui.checkbox(&mut self.settings.show_v_area, "Carved area")
+                    .on_hover_text("Show the area cut by the V-bit");
+                ui.checkbox(&mut self.settings.show_v_path, "Tool path")
+                    .on_hover_text("Show the path of the tool");
+            }
+            ui.checkbox(&mut self.preview.layers.grid, "Grid")
+                .on_hover_text("Show grid lines and axis labels behind the design");
+            ui.checkbox(&mut self.settings.show_axis, "Origin axes")
+                .on_hover_text("Show arrows along the X and Y axes at the work origin");
+            ui.checkbox(&mut self.settings.show_box, "Bounding box")
+                .on_hover_text("Shade the smallest rectangle that holds the design");
+            ui.checkbox(&mut self.settings.show_thick, "Line thickness")
+                .on_hover_text(
+                    "Draw engraved outlines at the width of the bit instead of a hairline",
+                );
+            ui.checkbox(&mut self.preview.layers.clean_straight, "Straight cleanup")
+                .on_hover_text("Show the paths of the straight-bit cleanup, once calculated");
+            ui.checkbox(&mut self.preview.layers.clean_v_bit, "V-bit cleanup")
+                .on_hover_text("Show the paths of the V-bit cleanup, once calculated");
+        });
     }
 
     fn gcode_view(&mut self, ui: &mut Ui) {

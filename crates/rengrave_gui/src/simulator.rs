@@ -195,9 +195,21 @@ impl SimulatorView {
             }
         });
         ui.separator();
-        ui.toggle_button(&mut self.show_path, "Path")
+        ui.separator();
+        // Rarely changed, so kept in a popover that stays open while the controls are adjusted.
+        ui.options_menu(
+            "Render",
+            "Path, resolution, relief, and smoothing of the stock",
+            |ui| self.render_controls(ui),
+        );
+    }
+
+    /// Draws the controls for how the stock is rendered.
+    fn render_controls(&mut self, ui: &mut Ui) {
+        ui.checkbox(&mut self.show_path, "Path")
             .on_hover_text("Show the whole tool path: cuts and rapid moves");
         ui.separator();
+        ui.label(ui.control_label("Resolution"));
         ui.option_group(|ui| {
             for resolution in Simulation::RESOLUTIONS {
                 let chosen = ui
@@ -217,7 +229,7 @@ impl SimulatorView {
                 "Exaggerate the depth of the cuts in the shading. The cuts are unchanged.",
             );
         let smooth = ui
-            .toggle_button(&mut self.smooth, "Smooth")
+            .checkbox(&mut self.smooth, "Smooth")
             .on_hover_text("Blend the stock between cells, instead of showing each cell sharply");
         if relief.changed() || smooth.changed() {
             // Both change how every cell is drawn, so draw the whole texture again.

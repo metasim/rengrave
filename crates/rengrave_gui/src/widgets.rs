@@ -123,8 +123,9 @@ pub trait UiExt {
     /// A button with an icon before its text. Its accessible name is the text alone.
     fn icon_button(&mut self, enabled: bool, icon: char, text: &str) -> Response;
 
-    /// A button that switches `value` on and off. Off, it is an outline with no fill.
-    fn toggle_button(&mut self, value: &mut bool, text: &str) -> Response;
+    /// A toolbar button that opens a popover of controls. The popover stays open while its
+    /// controls are used, and closes on a click outside it.
+    fn options_menu(&mut self, label: &str, tip: &str, add: impl FnOnce(&mut Ui));
 
     /// A menu entry with an icon, and optionally the text of its keyboard shortcut.
     fn menu_item(
@@ -308,26 +309,22 @@ impl UiExt for Ui {
             });
     }
 
+    fn options_menu(&mut self, label: &str, tip: &str, add: impl FnOnce(&mut Ui)) {
+        let config = egui::containers::menu::MenuConfig::new()
+            .style(Look::menu_style)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        let (button, _) = egui::containers::menu::MenuButton::new(label)
+            .config(config)
+            .ui(self, add);
+        button.on_hover_text(tip);
+    }
+
     fn control_label(&self, text: impl Into<String>) -> RichText {
         RichText::new(text).color(self.visuals().hyperlink_color)
     }
 
     fn section_heading(&self, text: impl Into<String>) -> RichText {
         Look::bold(text).color(self.visuals().hyperlink_color)
-    }
-
-    fn toggle_button(&mut self, value: &mut bool, text: &str) -> Response {
-        let mut button = egui::Button::new(text).selected(*value);
-        if !*value {
-            // An outline alone, so that it does not look like an action button.
-            button = button.fill(egui::Color32::TRANSPARENT);
-        }
-        let mut response = self.add(button);
-        if response.clicked() {
-            *value = !*value;
-            response.mark_changed();
-        }
-        response
     }
 
     fn icon_button(&mut self, enabled: bool, icon: char, text: &str) -> Response {
