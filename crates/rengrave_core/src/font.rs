@@ -11,6 +11,9 @@
 //! [`Font`] whose glyphs are lists of straight strokes.
 
 use crate::error::{Error, Result};
+use skrifa::instance::{LocationRef, Size};
+use skrifa::outline::{DrawSettings, OutlinePen};
+use skrifa::{FontRef, GlyphId, MetadataProvider};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -166,45 +169,49 @@ impl Font {
     /// within `seg_arc` degrees. Latin-1 characters are loaded unless `extended_chars` asks for
     /// every code point in the font. Contours are normalized so outer loops run clockwise.
     pub fn from_outline_font(data: &[u8], seg_arc: f64, extended_chars: bool) -> Result<Self> {
-        let face = ttf_parser::Face::parse(data, 0)
+        let face = FontRef::from_index(data, 0)
             .map_err(|e| Error::Font(format!("unable to parse font: {e}")))?;
         let tol = seg_arc.max(0.01).to_radians();
-
-        let probe = face.glyph_index('A').and_then(|id| {
+        let charmap = face.charmap();
+        let outlines = face.outline_glyphs();
+        let draw = |id: GlyphId| -> Option<Vec<Stroke>> {
             let mut sink = OutlineSink::new(tol);
-            face.outline_glyph(id, &mut sink)?;
-            let y_max = sink
-                .strokes
+            outlines
+                .get(id)?
+                .draw(
+                    DrawSettings::unhinted(Size::unscaled(), LocationRef::default()),
+                    &mut sink,
+                )
+                .ok()?;
+            (!sink.strokes.is_empty()).then_some(sink.strokes)
+        };
+
+        let probe = charmap.map('A').and_then(draw).and_then(|strokes| {
+            let y_max = strokes
                 .iter()
                 .map(|s| s.y1.max(s.y2))
                 .fold(f64::NEG_INFINITY, f64::max);
             (y_max > 0.0).then_some(y_max)
         });
-        let cap_height = probe.unwrap_or_else(|| f64::from(face.units_per_em()) * 0.7);
+        let units_per_em = face
+            .metrics(Size::unscaled(), LocationRef::default())
+            .units_per_em;
+        let cap_height = probe.unwrap_or_else(|| f64::from(units_per_em) * 0.7);
         let factor = 9.0 / cap_height;
 
         let mut font = Self::default();
         let mut chars: Vec<u32> = Vec::new();
         if extended_chars {
-            if let Some(cmap) = face.tables().cmap {
-                for sub in cmap.subtables.into_iter().filter(|s| s.is_unicode()) {
-                    sub.codepoints(|c| chars.push(c));
-                }
-            }
+            chars.extend(charmap.mappings().map(|(code, _)| code));
             chars.sort_unstable();
             chars.dedup();
         } else {
             chars.extend(1..256);
         }
         for code in chars {
-            let Some(id) = char::from_u32(code).and_then(|c| face.glyph_index(c)) else {
+            let Some(mut strokes) = charmap.map(code).and_then(draw) else {
                 continue;
             };
-            let mut sink = OutlineSink::new(tol);
-            if face.outline_glyph(id, &mut sink).is_none() {
-                continue;
-            }
-            let mut strokes = sink.strokes;
             Font::normalize_winding(&mut strokes);
             for s in &mut strokes {
                 s.x1 *= factor;
@@ -323,7 +330,7 @@ impl OutlineSink {
     }
 }
 
-impl ttf_parser::OutlineBuilder for OutlineSink {
+impl OutlinePen for OutlineSink {
     fn move_to(&mut self, x: f32, y: f32) {
         self.start = (f64::from(x), f64::from(y));
         self.cur = self.start;
