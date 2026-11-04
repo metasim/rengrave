@@ -13,6 +13,7 @@ pub mod dialogs;
 mod gcode_view;
 mod icons;
 mod inspector;
+mod preferences;
 pub mod preview;
 pub mod simulator;
 mod style;
@@ -21,3 +22,4 @@ pub mod worker;
 
 pub use app::{ActiveView, RengraveApp, Status, StatusLevel, Tab};
 pub use dialogs::{FileDialogs, FileKind, NativeDialogs};
+pub use preferences::SettingsPage;

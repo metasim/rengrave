@@ -13,7 +13,9 @@ use rengrave_core::{
     ArcFit, BitShape, CleanupBit, CutType, FontCatalog, FontRef, InputType, Justify, Origin,
     Settings, Units,
 };
-use rengrave_gui::{ActiveView, FileDialogs, FileKind, RengraveApp, StatusLevel, Tab};
+use rengrave_gui::{
+    ActiveView, FileDialogs, FileKind, RengraveApp, SettingsPage, StatusLevel, Tab,
+};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -533,12 +535,66 @@ fn font_can_be_chosen_from_the_list() {
 }
 
 #[test]
-fn a_font_file_can_be_added_from_the_picker() {
-    let (mut harness, answers) = harness();
-    answers.answer_open(&fixture("tiny.cxf"));
+fn manage_fonts_opens_the_settings_dialog_on_the_fonts_page() {
+    let (mut harness, _) = harness();
     click(&mut harness, "Font");
+    click(&mut harness, "Manage fonts…");
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Application settings").is_some());
+    assert!(harness.query_by_label("Your fonts").is_some());
+}
+
+#[test]
+fn fonts_are_added_and_removed_in_the_settings_dialog_and_saved() {
+    let (mut harness, answers) = harness();
+    let dir = std::env::temp_dir().join(format!("rengrave_ui_settings_{}", std::process::id()));
+    let file = dir.join("settings.yaml");
+    // The settings file holds the library, so start it with the font the job uses.
+    let hack = harness.state().fonts().user_fonts()[0].path.clone();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        &file,
+        format!(
+            "user_fonts:\n  - name: Hack\n    path: {}\n",
+            hack.display()
+        ),
+    )
+    .unwrap();
+    harness.state_mut().use_app_settings(file.clone());
+    harness.state_mut().show_app_settings(SettingsPage::Fonts);
+    harness.run_steps(2);
+
+    answers.answer_open(&fixture("tiny.cxf"));
     click(&mut harness, "Add font file…");
     settle(&mut harness);
+    let names = |h: &Harness<'_, RengraveApp>| -> Vec<String> {
+        h.state()
+            .fonts()
+            .user_fonts()
+            .into_iter()
+            .map(|f| f.name)
+            .collect()
+    };
+    assert_eq!(names(&harness), ["Hack", "tiny"]);
+    assert_eq!(
+        harness.state().settings.font,
+        FontRef::User("Hack".into()),
+        "adding in the dialog does not change the job's font"
+    );
+    let saved = std::fs::read_to_string(&file).unwrap();
+    assert!(saved.contains("tiny"), "{saved}");
+
+    harness.get_all_by_label("Remove").nth(1).unwrap().click();
+    harness.run_steps(2);
+    assert_eq!(names(&harness), ["Hack"]);
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("tiny"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn dropping_a_font_file_adds_and_selects_it() {
+    let (mut harness, _) = harness();
+    harness.state_mut().open_path(&fixture("tiny.cxf"));
     assert_eq!(harness.state().settings.font, FontRef::User("tiny".into()));
     assert!(
         harness

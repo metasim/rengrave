@@ -6,8 +6,8 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rengrave_core::font::Font;
 use rengrave_core::{
-    ArcFit, BitShape, CheckScope, CleanupBit, CutType, FontCatalog, FontRef, GcodeProgram,
-    InputType, Job, Justify, Origin, Progress, Settings, Tracer, Units,
+    AppSettings, ArcFit, BitShape, CheckScope, CleanupBit, CutType, FontCatalog, FontRef,
+    GcodeProgram, InputType, Job, Justify, Origin, Progress, Settings, Tracer, Units,
 };
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -54,7 +54,7 @@ enum Command {
     },
     /// Write the job's settings as a settings file, which `--settings` can load.
     Settings(OutputArgs),
-    /// List the installed fonts, or describe one font file.
+    /// List the fonts in your library and the installed fonts, or describe one font file.
     Fonts {
         /// A font file to describe instead of listing installed fonts.
         file: Option<PathBuf>,
@@ -435,12 +435,25 @@ impl JobArgs {
         } else {
             FontCatalog::without_system_fonts()
         };
+        Self::apply_app_settings(&catalog);
         if let Some(path) = &self.font_file {
             catalog
                 .add_user_font(path, Some(&Self::font_file_name(path)))
                 .map_err(|e| e.to_string())?;
         }
         Ok(catalog)
+    }
+
+    /// Reads the settings shared with the desktop application, which hold the user's fonts. A
+    /// settings file that cannot be read is reported and otherwise ignored.
+    fn apply_app_settings(catalog: &FontCatalog) {
+        let Some(path) = AppSettings::default_path() else {
+            return;
+        };
+        match AppSettings::load_from(&path) {
+            Ok(settings) => settings.apply_to(catalog),
+            Err(e) => eprintln!("warning: {e}"),
+        }
     }
 
     fn job(&self) -> Result<Job, String> {
@@ -557,7 +570,12 @@ impl Cli {
                     Self::describe_font(&path.display().to_string(), &font);
                     return Ok(());
                 }
-                for family in FontCatalog::with_system_fonts().system_families() {
+                let catalog = FontCatalog::with_system_fonts();
+                JobArgs::apply_app_settings(&catalog);
+                for font in catalog.user_fonts() {
+                    println!("user:{}\t{}", font.name, font.path.display());
+                }
+                for family in catalog.system_families() {
                     println!("system:{family}");
                 }
                 Ok(())

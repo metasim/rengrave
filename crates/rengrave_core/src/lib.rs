@@ -35,6 +35,7 @@
 
 #![warn(missing_docs)]
 
+pub mod app_settings;
 pub mod catalog;
 pub mod cleanup;
 pub mod design;
@@ -53,6 +54,7 @@ pub mod trace;
 pub mod unicode_blocks;
 pub mod vcarve;
 
+pub use app_settings::AppSettings;
 pub use catalog::{FontCatalog, FontRef, UserFont};
 pub use cleanup::CleanupPaths;
 pub use design::Design;

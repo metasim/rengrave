@@ -7,9 +7,19 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
+/// The application settings file the tests use, which does not exist unless a test writes it, so
+/// the tests never read the settings of the person running them.
+fn app_settings_path() -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "rengrave_cli_{}_app_settings.yaml",
+        std::process::id()
+    ))
+}
+
 fn rengrave(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rengrave-cli"))
         .args(args)
+        .env("RENGRAVE_SETTINGS", app_settings_path())
         .output()
         .expect("binary runs")
 }
@@ -218,6 +228,53 @@ fn fonts_describes_a_font_file() {
     let listing = stdout_of_plain(&["fonts", &fixture("tiny.cxf")]);
     assert!(listing.contains("tiny.cxf"));
     assert!(listing.contains("characters"));
+}
+
+#[test]
+fn fonts_in_the_shared_settings_file_are_usable() {
+    let dir = temp_dir("shared");
+    let settings = dir.join("settings.yaml");
+    std::fs::write(
+        &settings,
+        format!(
+            "user_fonts:\n  - name: Mine\n    path: {}\n",
+            fixture("tiny.cxf")
+        ),
+    )
+    .unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_rengrave-cli"))
+            .args(args)
+            .env("RENGRAVE_SETTINGS", &settings)
+            .output()
+            .expect("binary runs")
+    };
+    let out = run(&["gcode", "-f", "user:Mine", "-t", "AB"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("G1 X"));
+    let listing = run(&["fonts"]);
+    assert!(String::from_utf8_lossy(&listing.stdout).contains("user:Mine"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_broken_shared_settings_file_warns_but_does_not_stop_the_job() {
+    let dir = temp_dir("broken");
+    let settings = dir.join("settings.yaml");
+    std::fs::write(&settings, "user_fonts: [oops\n").unwrap();
+    let font = test_font();
+    let out = Command::new(env!("CARGO_BIN_EXE_rengrave-cli"))
+        .args(["gcode", "--font-file", &font, "-t", "A"])
+        .env("RENGRAVE_SETTINGS", &settings)
+        .output()
+        .expect("binary runs");
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("settings.yaml"));
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
