@@ -16,5 +16,8 @@ path = "src/main.rs"
 rengrave_core.workspace = true
 clap.workspace = true
 
+[dev-dependencies]
+epaint_default_fonts.workspace = true
+
 [lints]
 workspace = true

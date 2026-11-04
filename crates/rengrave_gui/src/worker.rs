@@ -4,8 +4,8 @@
 //! Runs layout and toolpath calculations on a background thread.
 
 use rengrave_core::{
-    CarvePath, CarvePoint, CleanupBit, CleanupPaths, CutType, Design, Error, Job, Progress,
-    Settings,
+    CarvePath, CarvePoint, CleanupBit, CleanupPaths, CutType, Design, Error, FontCatalog, Job,
+    Progress, Settings,
 };
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -78,8 +78,8 @@ pub struct Worker {
 }
 
 impl Worker {
-    /// Starts the thread. `notify` is called from it whenever there is something new to show.
-    pub fn spawn(notify: impl Fn() + Send + Sync + 'static) -> Self {
+    /// Starts the thread, which loads fonts from `fonts`. `notify` is called from it whenever there is something new to show.
+    pub fn spawn(fonts: Arc<FontCatalog>, notify: impl Fn() + Send + Sync + 'static) -> Self {
         let (commands, command_rx) = mpsc::channel();
         let (update_tx, updates) = mpsc::channel();
         let fraction = Arc::new(AtomicU32::new(0));
@@ -88,6 +88,7 @@ impl Worker {
             updates: update_tx,
             fraction: fraction.clone(),
             notify: Arc::new(notify),
+            fonts,
             job: None,
         };
         std::thread::Builder::new()
@@ -157,6 +158,7 @@ struct ThreadState {
     updates: Sender<Update>,
     fraction: Arc<AtomicU32>,
     notify: Arc<dyn Fn() + Send + Sync>,
+    fonts: Arc<FontCatalog>,
     job: Option<Job>,
 }
 
@@ -211,7 +213,7 @@ impl ThreadState {
             job.settings = settings;
         } else {
             self.job = None;
-            self.job = Some(Job::load(settings)?);
+            self.job = Some(Job::load(settings, &self.fonts)?);
         }
         Ok(self.job.as_ref().expect("assigned above"))
     }

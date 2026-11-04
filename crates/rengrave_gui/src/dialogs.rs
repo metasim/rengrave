@@ -34,7 +34,7 @@ impl FileKind {
                     "tiff",
                 ],
             ),
-            Self::Font => ("Fonts", &["cxf", "ttf", "otf"]),
+            Self::Font => ("Fonts", &["cxf", "ttf", "otf", "ttc", "otc"]),
             Self::SettingsOpen => ("Settings or G-code", &["ngc", "nc", "tap", "gcode", "txt"]),
             Self::SettingsSave | Self::Gcode => ("G-code", &["ngc", "nc", "tap", "gcode"]),
             Self::Svg => ("SVG", &["svg"]),

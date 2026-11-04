@@ -61,15 +61,23 @@ licenses permit bundling with a GPL program.
 
 The Reserved Font Name condition applies to modified versions, and the fonts are not modified.
 
+## Unicode data
+
+`crates/rengrave_core/data/Blocks.txt` is the Unicode Character Database file `Blocks-18.0.0.txt`,
+copied unmodified and read at run time to name the Unicode blocks. It is under the Unicode License
+v3 ([`LICENSES/Unicode-3.0.txt`](LICENSES/Unicode-3.0.txt)), copyright 1991-2026 Unicode, Inc.
+
 ## Used but not copied
 
 - **`ttf2cxf_stream`:** F-Engrave's C++ TrueType helper, based on RibbonSoft's ttf2cxf, is licensed
   under GPL **version 2 only**, which cannot be combined with GPL-3.0 code in one program. F-Engrave
   runs it as a separate process. rengrave does not contain or run it: fonts are read with
-  `ttf-parser`, and curve flattening in `font.rs` was written independently. The convention that a
+  `skrifa`, and curve flattening in `font.rs` was written independently. The convention that a
   capital `A` is nine units tall is a property of the CXF format that rengrave's fonts follow.
 - **`potrace`:** an optional external program, run as a separate process.
-- **Built-in typefaces:** from the `epaint_default_fonts` crate. Ubuntu Light is under the Ubuntu
-  Font License, and Hack under its own permissive license. See that crate for the texts.
+- **Fonts:** rengrave bundles no engraving font. It reads the fonts installed on the machine and
+  font files the user adds, and the user is responsible for the license of any font they engrave.
+  `epaint_default_fonts` is a test-only dependency of `rengrave_core`, and egui's own use of it
+  is for the interface.
 - **Other dependencies:** Cargo dependencies keep their own licenses, listed in `Cargo.lock` and
   their manifests.

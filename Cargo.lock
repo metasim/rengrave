@@ -3031,6 +3031,7 @@ name = "rengrave_cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "epaint_default_fonts",
  "rengrave_core",
 ]
 
@@ -3041,6 +3042,7 @@ dependencies = [
  "approx",
  "clipper2-rust",
  "epaint_default_fonts",
+ "fontique",
  "glam",
  "image",
  "skrifa",
@@ -3057,6 +3059,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_kittest",
+ "epaint_default_fonts",
  "image",
  "rengrave_core",
  "rfd",

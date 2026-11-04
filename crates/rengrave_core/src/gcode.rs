@@ -330,7 +330,7 @@ impl GcodeProgram {
         }
         out.push("(=========================================================)".to_string());
         out.extend(settings.to_settings_lines());
-        out.push(format!("( Fontfile: {} )", settings.font_file));
+        out.push(format!("( Font: {} )", settings.font));
         out.push("(#########################################################)".to_string());
         out
     }

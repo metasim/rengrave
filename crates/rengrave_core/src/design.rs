@@ -307,17 +307,13 @@ impl Design {
         if !settings.show_font_index {
             return settings.text.clone();
         }
-        let columns = if settings.extended_chars {
-            (1.5 * (font.glyphs.len() as f64).sqrt()) as usize
-        } else {
-            15
-        };
+        let columns = 15;
         let mut out = String::new();
         let mut count = 0;
         for ch in font
             .glyphs
             .keys()
-            .filter(|&&k| settings.extended_chars || k < 256)
+            .filter(|&&k| k < 256)
             .filter_map(|&k| char::from_u32(k))
         {
             count += 1;

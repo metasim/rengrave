@@ -6,12 +6,12 @@
 
 //! The settings panel: all job settings, grouped by the step of the workflow they belong to.
 
-use crate::app::{RengraveApp, StatusLevel, Tab};
+use crate::app::{RengraveApp, Tab};
 use crate::icons;
 use crate::widgets::{Form, Number, UiExt};
 use egui::{CollapsingHeader, Grid, Ui};
 use rengrave_core::{
-    ArcFit, BitShape, BuiltinFont, CheckScope, CleanupBit, CutType, HeightCalc, InputType, Justify,
+    ArcFit, BitShape, CheckScope, CleanupBit, CutType, FontRef, HeightCalc, InputType, Justify,
     Origin, Settings, Tracer, TurnPolicy,
 };
 
@@ -119,18 +119,9 @@ impl RengraveApp {
                 .response
                 .labelled_by(label.id)
                 .on_hover_text("The font for the text");
-            if ui
-                .icon_button(true, icons::OPEN, "Folder…")
-                .on_hover_text("Choose a folder of font files")
-                .clicked()
-            {
-                self.choose_font_dir();
-            }
         });
         ui.checkbox(&mut self.settings.show_font_index, "Show all characters")
-            .on_hover_text("Lay out every character in the font, to see what it contains");
-        ui.checkbox(&mut self.settings.extended_chars, "Extended characters")
-            .on_hover_text("Load characters beyond Latin-1. Fonts may become slower to load.");
+            .on_hover_text("Lay out the Latin-1 characters of the font, to see what it contains");
     }
 
     fn font_menu(&mut self, ui: &mut Ui) {
@@ -146,38 +137,72 @@ impl RengraveApp {
         egui::ScrollArea::vertical()
             .max_height(260.0)
             .show(ui, |ui| {
-                for font in BuiltinFont::ALL {
-                    let name = font.name();
-                    if matches(name) {
-                        ui.selectable_value(
-                            &mut self.settings.font_file,
-                            name.to_string(),
-                            format!("{name} (built in)"),
-                        );
-                    }
-                }
-                ui.separator();
-                for path in self.font_files.clone() {
-                    let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned())
-                    else {
-                        continue;
-                    };
-                    if !matches(&name) {
-                        continue;
-                    }
-                    let response = ui.selectable_label(self.settings.font_file == name, &name);
-                    if response.clicked() {
-                        if Self::font_is_loadable(&path) {
-                            self.settings.font_file = name;
-                        } else {
-                            self.notify(StatusLevel::Error, format!("Unable to load {name}"));
-                        }
-                    }
-                }
-                if self.font_files.is_empty() {
-                    ui.weak(format!("No fonts in {}", self.settings.font_dir.display()));
-                }
+                self.user_font_entries(ui, &matches);
+                self.system_font_entries(ui, &matches);
             });
+        ui.separator();
+        if ui
+            .icon_button(true, icons::OPEN, "Add font file…")
+            .on_hover_text("Add a font file to your library")
+            .clicked()
+        {
+            self.add_font_dialog();
+            ui.close();
+        }
+    }
+
+    /// The "User fonts" group of the picker.
+    fn user_font_entries(&mut self, ui: &mut Ui, matches: &dyn Fn(&str) -> bool) {
+        ui.weak("User fonts");
+        let fonts = self.fonts.user_fonts();
+        let mut shown = false;
+        for font in fonts.iter().filter(|f| matches(&f.name)) {
+            shown = true;
+            ui.selectable_value(
+                &mut self.settings.font,
+                FontRef::User(font.name.clone()),
+                &font.name,
+            );
+        }
+        if !shown {
+            ui.weak(if fonts.is_empty() {
+                "None added yet"
+            } else {
+                "No match"
+            });
+        }
+    }
+
+    /// The "System fonts" group of the picker.
+    fn system_font_entries(&mut self, ui: &mut Ui, matches: &dyn Fn(&str) -> bool) {
+        ui.add_space(4.0);
+        ui.weak("System fonts");
+        if self.fonts.is_scanning() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.weak("Loading system fonts…");
+            });
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+            return;
+        }
+        ui.selectable_value(
+            &mut self.settings.font,
+            FontRef::Default,
+            "Default (sans-serif)",
+        );
+        for family in self
+            .fonts
+            .system_families()
+            .into_iter()
+            .filter(|f| matches(f))
+        {
+            ui.selectable_value(
+                &mut self.settings.font,
+                FontRef::System(family.clone()),
+                family,
+            );
+        }
     }
 
     fn image_source(&mut self, ui: &mut Ui) {

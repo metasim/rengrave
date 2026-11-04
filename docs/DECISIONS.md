@@ -33,12 +33,20 @@ with `ttf-parser`, scales glyphs by the CXF convention that `A` is 9 units tall,
 curves adaptively. *Corrected by D15:* this first ported the helper's flattening, which was a
 licensing mistake.
 
-## D5. Fonts out of the box
+## D5. Fonts: installed and user-added, none bundled
 
-The distribution ships no fonts, and without one the program cannot produce anything. The
-port embeds the Ubuntu Light and Hack typefaces through the `epaint_default_fonts` crate
-(already in the GUI's dependency tree) so that `rengrave-cli gcode --text Hello` works with zero
-setup. CXF stroke fonts and TTF/OTF files are loaded the same way as in the original.
+*Supersedes the original D5, which embedded Ubuntu Light and Hack so that the program worked with
+no setup.* The program now ships no engraving font. Text uses fonts from two libraries:
+
+- **System fonts:** every family installed on the machine, found with `fontique` (the engine
+  `eframe` already uses for fallback fonts) through CoreText, DirectWrite, or fontconfig.
+- **User fonts:** CXF, TTF, OTF, and TTC files the user adds, listed by name.
+
+A job names its font as `system:<family>` or `user:<name>`; no name means the system's default
+sans-serif. Glyph outlines are read with `skrifa`, which egui also uses, and only Latin-1 and the
+characters in the text are loaded, so large fonts stay cheap. Output can differ between machines
+that have different fonts. Settings files no longer carry F-Engrave's `fontdir` and `fontfile`
+keys; the reader ignores them. See `docs/PLAN_SYSTEM_FONTS.md`.
 
 ## D6. Bitmap tracing: native tracer, with potrace optional
 
