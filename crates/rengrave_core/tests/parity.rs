@@ -4,9 +4,12 @@
 //! Compares output with reference G-code produced by the original F-Engrave 1.78.
 //!
 //! The fixtures in `tests/parity` are written by `tools/parity/generate.py`, which runs the
-//! original program's batch mode. Every program must match line for line. Trailing whitespace
-//! is ignored because the original appends a space to header lines read from settings files, and
-//! one deliberate difference, for FluidNC, is undone before comparing.
+//! original program's batch mode. Every program must match line for line, with the tolerance
+//! described in `common`. Trailing whitespace is ignored because the original appends a space to
+//! header lines read from settings files, and one deliberate difference, for FluidNC, is undone
+//! before comparing.
+
+mod common;
 
 use rengrave_core::font::Font;
 use rengrave_core::{FontCatalog, FontRef, InputType, Job, Progress, Settings};
@@ -59,15 +62,12 @@ fn check_case(name: &str) {
         .unwrap_or_else(|e| panic!("{name}: {e}"));
 
     let expected: Vec<&str> = expected.lines().map(str::trim_end).collect();
-    for (i, (a, e)) in actual.iter().zip(&expected).enumerate() {
-        let a = if name == "engrave_circle" {
-            without_circle_end_point(a)
-        } else {
-            a.clone()
-        };
-        assert_eq!(&a, e, "{name}: first difference at line {}", i + 1);
-    }
-    assert_eq!(actual.len(), expected.len(), "{name}: program length");
+    let actual: Vec<String> = if name == "engrave_circle" {
+        actual.iter().map(|a| without_circle_end_point(a)).collect()
+    } else {
+        actual
+    };
+    common::assert_same_program(name, &actual, &expected);
 }
 
 macro_rules! parity_cases {
