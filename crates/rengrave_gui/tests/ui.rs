@@ -617,6 +617,16 @@ fn fonts_are_added_and_removed_in_the_settings_dialog_and_saved() {
 }
 
 #[test]
+fn add_in_the_font_list_adds_and_selects_a_font() {
+    let (mut harness, answers) = harness();
+    answers.answer_open(&fixture("tiny.cxf"));
+    click(&mut harness, "Font");
+    click(&mut harness, "Add…");
+    settle(&mut harness);
+    assert_eq!(harness.state().settings.font, FontRef::User("tiny".into()));
+}
+
+#[test]
 fn dropping_a_font_file_adds_and_selects_it() {
     let (mut harness, _) = harness();
     harness.state_mut().open_path(&fixture("tiny.cxf"));
