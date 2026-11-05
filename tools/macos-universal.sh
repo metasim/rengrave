@@ -9,11 +9,14 @@
 #   rengrave, rengrave-cli       universal binaries
 #   bundle/Rengrave.app          universal application bundle (needs cargo-bundle)
 #
-# Set MACOSX_DEPLOYMENT_TARGET to choose the oldest macOS the binaries support.
+# The binaries support macOS 13 (Ventura) and later. Set MACOSX_DEPLOYMENT_TARGET to override.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+# Also read by the compiler and linker, so every dependency is built for this version.
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 
 ARM=aarch64-apple-darwin
 INTEL=x86_64-apple-darwin

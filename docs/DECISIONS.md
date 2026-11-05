@@ -249,7 +249,8 @@ because `egui_kittest` draws into a different context than the one given to `new
 - **Universal binaries.** Cargo builds one target at a time, so `tools/macos-universal.sh` builds
   `aarch64-apple-darwin` and `x86_64-apple-darwin`, joins the executables with `lipo`, and puts the
   universal executable into the arm64 bundle that `cargo-bundle` made, then signs it ad hoc. It
-  does not notarize.
+  does not notarize. The minimum is macOS 13 (Ventura), set through `MACOSX_DEPLOYMENT_TARGET` and
+  `minimum_system_version`.
 - **Branches.** The repository now has a remote, `origin`. `main` holds only the initial commit and
   receives work through pull requests, with `develop` as the integration branch. Nothing from the
   port has reached `main`.

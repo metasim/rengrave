@@ -65,8 +65,8 @@ tools/macos-universal.sh
 
 The results are in `target/universal/release`: `rengrave`, `rengrave-cli`, and
 `bundle/Rengrave.app`. The app is ad-hoc signed, so it runs on the machine that built it; other
-machines need a Developer ID signature and notarization. Set `MACOSX_DEPLOYMENT_TARGET` to choose
-the oldest macOS supported.
+machines need a Developer ID signature and notarization. It supports macOS 13 (Ventura) and
+later; set `MACOSX_DEPLOYMENT_TARGET` to change that.
 
 The window shows the design, its carved area, and the tool path, recalculating after each change.
 Choose the text and font on the **Design** tab and the bit on the **Toolpath** tab, then choose

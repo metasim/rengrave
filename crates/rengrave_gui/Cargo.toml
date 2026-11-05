@@ -41,3 +41,6 @@ identifier = "net.metasim.rengrave"
 short_description = "Engraving and V-carve G-code generator"
 category = "public.app-category.graphics-design"
 copyright = "Copyright 2026 Simeon H.K. Fitch. Licensed under GPL-3.0-or-later."
+
+[package.metadata.bundle.macos]
+minimum_system_version = "13.0"
