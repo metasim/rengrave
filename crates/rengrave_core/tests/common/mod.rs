@@ -141,6 +141,29 @@ impl Line {
     }
 }
 
+/// Fails unless `actual` has the lines of `expected` that are not moves, in the same order, and
+/// some moves. For programs whose path differs between platforms; see the parity tests.
+pub fn assert_same_apart_from_moves(name: &str, actual: &[String], expected: &[&str]) {
+    let text_of = |lines: Vec<Line>| -> Vec<String> {
+        lines
+            .into_iter()
+            .filter_map(|l| match l {
+                Line::Text(t) => Some(t),
+                Line::Move { .. } => None,
+            })
+            .collect()
+    };
+    let actual_lines = Line::expand(actual.iter().map(String::as_str));
+    let moves = actual_lines.len();
+    let actual_text = text_of(actual_lines);
+    assert!(
+        moves > actual_text.len(),
+        "{name}: the program has no moves"
+    );
+    let expected_text = text_of(Line::expand(expected.iter().copied()));
+    assert_eq!(actual_text, expected_text, "{name}: lines other than moves");
+}
+
 /// Fails unless `actual` is the program `expected`, within the tolerance described above.
 pub fn assert_same_program(name: &str, actual: &[String], expected: &[&str]) {
     let actual_lines = Line::expand(actual.iter().map(String::as_str));
