@@ -581,6 +581,41 @@ fn font_page_characters_are_copied_to_the_clipboard() {
 }
 
 #[test]
+fn the_font_filter_has_focus_stays_open_when_clicked_and_narrows_the_list() {
+    let (mut harness, _) = harness();
+    harness
+        .state()
+        .fonts()
+        .add_user_font(&fixture("tiny.cxf"), Some("tiny"))
+        .unwrap();
+    harness.get_by_label("Font").click();
+    harness.run_steps(3);
+    assert!(
+        harness
+            .get_by_label("Filter fonts")
+            .accesskit_node()
+            .is_focused(),
+        "typing starts at once"
+    );
+    // A click in the filter must not close the menu.
+    harness.get_by_label("Filter fonts").click();
+    harness.run_steps(3);
+    harness.get_by_label("Filter fonts").type_text("tin");
+    harness.run_steps(3);
+    assert!(harness.query_by_label("tiny").is_some());
+    assert!(harness.query_by_label("Hack").is_none(), "filtered out");
+    // Choosing a font closes the menu.
+    harness.get_by_label("tiny").click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("Filter fonts").is_none());
+    assert_eq!(harness.state().settings.font, FontRef::User("tiny".into()));
+    // Reopening starts with an empty filter.
+    harness.get_by_label("Font").click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("Hack").is_some());
+}
+
+#[test]
 fn manage_fonts_opens_the_settings_dialog_on_the_fonts_page() {
     let (mut harness, _) = harness();
     click(&mut harness, "Font");
