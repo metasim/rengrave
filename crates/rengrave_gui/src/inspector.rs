@@ -261,20 +261,26 @@ impl RengraveApp {
         ui.label(egui::RichText::new(name).strong().weak());
     }
 
-    /// The "User fonts" group of the picker, ending with the entry that adds one.
+    /// The "User fonts" group of the picker, with a small button beside the heading that adds one.
     fn user_font_entries(&mut self, ui: &mut Ui, matches: &dyn Fn(&str) -> bool) {
-        Self::font_group_heading(ui, "User fonts");
+        let add = ui
+            .horizontal(|ui| {
+                Self::font_group_heading(ui, "User fonts");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.small_button("Add…")
+                        .on_hover_text("Add font files in the application settings")
+                        .clicked()
+                })
+                .inner
+            })
+            .inner;
         let fonts = self.fonts.user_fonts();
         for font in fonts.iter().filter(|f| matches(&f.name)) {
             self.font_choice(ui, FontRef::User(font.name.clone()), &font.name);
         }
-        if ui
-            .button("Add…")
-            .on_hover_text("Add a font file to your fonts and use it")
-            .clicked()
-        {
+        if add {
+            self.show_app_settings(crate::preferences::SettingsPage::Fonts);
             ui.close();
-            self.add_font_dialog(true);
         }
     }
 

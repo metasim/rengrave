@@ -673,13 +673,13 @@ fn fonts_are_added_and_removed_in_the_settings_dialog_and_saved() {
 }
 
 #[test]
-fn add_in_the_font_list_adds_and_selects_a_font() {
-    let (mut harness, answers) = harness();
-    answers.answer_open(&fixture("tiny.cxf"));
+fn add_in_the_font_list_opens_the_fonts_page_of_the_settings() {
+    let (mut harness, _) = harness();
     click(&mut harness, "Font");
     click(&mut harness, "Add…");
-    settle(&mut harness);
-    assert_eq!(harness.state().settings.font, FontRef::User("tiny".into()));
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Application settings").is_some());
+    assert!(harness.query_by_label("Your fonts").is_some());
 }
 
 #[test]
