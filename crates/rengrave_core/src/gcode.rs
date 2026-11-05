@@ -1228,6 +1228,7 @@ mod tests {
         let s = Settings {
             input_type: InputType::Text,
             text: "F".into(),
+            text_on_circle: true,
             text_radius: 3.0,
             add_box: true,
             ..engrave_settings()
@@ -1276,6 +1277,7 @@ mod tests {
         let around_text = Settings {
             input_type: InputType::Text,
             text: "F".into(),
+            text_on_circle: true,
             text_radius: 3.0,
             add_box: true,
             ..engrave_settings()

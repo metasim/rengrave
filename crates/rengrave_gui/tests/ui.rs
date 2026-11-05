@@ -728,6 +728,29 @@ fn dropping_a_font_file_adds_and_selects_it() {
 }
 
 #[test]
+fn circle_controls_appear_only_when_text_on_a_circle_is_on() {
+    let (mut harness, _) = harness();
+    assert!(!harness.state().settings.text_on_circle);
+    assert!(harness.query_by_label("Radius").is_none());
+    assert!(harness.query_by_label("Circle center").is_none());
+    click(&mut harness, "Text on a circle");
+    settle(&mut harness);
+    assert!(harness.state().settings.text_on_circle);
+    assert!(
+        harness.state().settings.text_radius > 0.0,
+        "a usable radius"
+    );
+    assert!(harness.query_by_label("Radius").is_some());
+    assert!(harness.query_by_label("Circle center").is_some());
+    harness.state_mut().settings.origin = Origin::ArcCenter;
+    click(&mut harness, "Text on a circle");
+    settle(&mut harness);
+    assert!(!harness.state().settings.text_on_circle);
+    assert_eq!(harness.state().settings.origin, Origin::Default);
+    assert!(harness.query_by_label("Radius").is_none());
+}
+
+#[test]
 fn circle_section_applies_radius() {
     let (mut harness, _) = harness();
     click(&mut harness, "Text on a circle");

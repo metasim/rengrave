@@ -237,7 +237,7 @@ impl Design {
             }));
         }
         let is_text = settings.input_type.uses_font();
-        let radius_in = if settings.input_type == InputType::Text {
+        let radius_in = if settings.input_type == InputType::Text && settings.text_on_circle {
             settings.text_radius
         } else {
             0.0
@@ -727,6 +727,7 @@ mod tests {
     #[test]
     fn circle_text_stays_at_radius() {
         let s = Settings {
+            text_on_circle: true,
             text_radius: 20.0,
             ..base()
         };
@@ -740,6 +741,7 @@ mod tests {
     #[test]
     fn inside_circle_text_extends_inward() {
         let s = Settings {
+            text_on_circle: true,
             text_radius: 20.0,
             outer: false,
             ..base()
@@ -754,6 +756,7 @@ mod tests {
     #[test]
     fn centered_circle_text_is_symmetric_about_y_axis() {
         let s = Settings {
+            text_on_circle: true,
             text_radius: 20.0,
             justify: Justify::Center,
             text: "AAA".into(),
@@ -792,6 +795,7 @@ mod tests {
         let s = Settings {
             add_box: true,
             box_gap: 1.0,
+            text_on_circle: true,
             text_radius: 20.0,
             ..base()
         };

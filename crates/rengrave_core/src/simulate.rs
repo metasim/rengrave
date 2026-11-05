@@ -849,6 +849,7 @@ mod tests {
         let settings = Settings {
             input_type: InputType::Text,
             text: "F".into(),
+            text_on_circle: true,
             text_radius: 3.0,
             add_box: true,
             stroke_thickness: 0.05,

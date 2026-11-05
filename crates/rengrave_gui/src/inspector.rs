@@ -107,11 +107,6 @@ impl RengraveApp {
         CollapsingHeader::new(ui.section_heading("Position"))
             .default_open(true)
             .show(ui, |ui| self.position_section(ui));
-        if self.settings.input_type == InputType::Text {
-            CollapsingHeader::new(ui.section_heading("Text on a circle"))
-                .default_open(self.settings.text_radius != 0.0)
-                .show(ui, |ui| self.circle_section(ui));
-        }
     }
 
     fn text_source(&mut self, ui: &mut Ui) {
@@ -586,7 +581,7 @@ impl RengraveApp {
             ui.origin_grid(&mut self.settings.origin);
             ui.radio_value(&mut self.settings.origin, Origin::Default, "Design origin")
                 .on_hover_text("The start of the text baseline, or the origin of the file");
-            if self.settings.input_type == InputType::Text {
+            if self.settings.input_type == InputType::Text && self.settings.text_on_circle {
                 ui.radio_value(
                     &mut self.settings.origin,
                     Origin::ArcCenter,
@@ -632,7 +627,7 @@ impl RengraveApp {
             form.check(ui, "Mirror", "Mirror about a vertical line", &mut s.mirror);
             form.check(ui, "Flip", "Mirror about a horizontal line", &mut s.flip);
             let circle_applies = s.input_type == InputType::Text
-                && s.text_radius != 0.0
+                && s.text_on_circle
                 && s.cut_type == CutType::Engrave;
             form.check(
                 ui,
@@ -650,22 +645,49 @@ impl RengraveApp {
                 );
             }
         });
+        if self.settings.input_type == InputType::Text {
+            self.circle_controls(ui);
+        }
     }
 
-    fn circle_section(&mut self, ui: &mut Ui) {
+    /// The switch that places text on a circle, and the controls that shape the circle.
+    fn circle_controls(&mut self, ui: &mut Ui) {
+        ui.add_space(4.0);
         let unit = self.unit();
         let issues = self.issues.clone();
         let mut form = Form {
             issues: &issues,
             length_unit: unit,
         };
+        let default_radius = match self.settings.units {
+            rengrave_core::Units::Inches => 1.0,
+            rengrave_core::Units::Millimeters => 25.0,
+        };
         let s = &mut self.settings;
+        let was_on = s.text_on_circle;
+        ui.compact_form_grid("circle_switch_grid", |ui| {
+            form.check(
+                ui,
+                "Text on a circle",
+                "Place the text along a circle instead of a straight line",
+                &mut s.text_on_circle,
+            );
+        });
+        if s.text_on_circle && !was_on && s.text_radius == 0.0 {
+            s.text_radius = default_radius;
+        }
+        if !s.text_on_circle {
+            if s.origin == Origin::ArcCenter {
+                s.origin = Origin::Default;
+            }
+            return;
+        }
         ui.form_grid("circle_grid", |ui| {
             form.length(
                 ui,
                 "Radius",
                 "text_radius",
-                "Radius of the circle; zero means straight text",
+                "Radius of the circle the text is placed on",
                 &mut s.text_radius,
             );
             ui.label(ui.control_label("Side"))

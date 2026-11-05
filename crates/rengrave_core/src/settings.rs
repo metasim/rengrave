@@ -312,7 +312,9 @@ pub struct Settings {
     // ---- Placement
     /// Rotation in degrees.
     pub angle: f64,
-    /// Radius of the circle text is placed on; zero for straight text.
+    /// Place text on a circle of `text_radius`. When off, the radius is kept but not used.
+    pub text_on_circle: bool,
+    /// Radius of the circle text is placed on when `text_on_circle` is set.
     pub text_radius: f64,
     /// Place text outside the circle rather than inside.
     pub outer: bool,
@@ -450,6 +452,7 @@ impl Default for Settings {
             ligatures: true,
             height_calc: HeightCalc::MaxUsed,
             angle: 0.0,
+            text_on_circle: false,
             text_radius: 0.0,
             outer: true,
             upper: true,
@@ -624,9 +627,9 @@ impl Settings {
                 "Word space should be greater than or equal to 0",
             );
             check(
-                non_negative(self.text_radius),
+                non_negative(self.text_radius) && (!self.text_on_circle || self.text_radius > 0.0),
                 "text_radius",
-                "Radius should be greater than or equal to 0",
+                "Radius should be greater than 0",
             );
         } else {
             check(
@@ -999,6 +1002,7 @@ impl Settings {
         set("ligatures", flag(self.ligatures).to_string());
         set("TANGLE", self.angle.to_string());
         set("TRADIUS", self.text_radius.to_string());
+        set("text_on_circle", flag(self.text_on_circle).to_string());
         set("ZSAFE", self.z_safe.to_string());
         set("ZCUT", self.z_cut.to_string());
         set("STHICK", self.stroke_thickness.to_string());
@@ -1165,7 +1169,13 @@ impl Settings {
             "kerning" => self.kerning = flag(value)?,
             "ligatures" => self.ligatures = flag(value)?,
             "TANGLE" => self.angle = num(value)?,
-            "TRADIUS" => self.text_radius = num(value)?,
+            "TRADIUS" => {
+                self.text_radius = num(value)?;
+                // F-Engrave has no switch; a radius of zero means straight text. A
+                // `text_on_circle` line, which follows the radius, overrides this.
+                self.text_on_circle = self.text_radius != 0.0;
+            }
+            "text_on_circle" => self.text_on_circle = flag(value)?,
             "ZSAFE" => self.z_safe = num(value)?,
             "ZCUT" => self.z_cut = num(value)?,
             "STHICK" => self.stroke_thickness = num(value)?,
@@ -1643,6 +1653,8 @@ mod tests {
             font_page: 1,
             kerning: false,
             ligatures: false,
+            text_on_circle: true,
+            text_radius: 12.5,
             cut_type: CutType::VCarve,
             bit_shape: BitShape::Ball,
             arc_fit: ArcFit::Radius,
