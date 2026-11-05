@@ -243,13 +243,18 @@ because `egui_kittest` draws into a different context than the one given to `new
 - **Name.** The window title, the About box, and the macOS application menu say "Rengrave". The
   binaries are `rengrave-cli` and `rengrave` (see D2).
 - **macOS bundle.** `cargo bundle --release`, run in `crates/rengrave_gui`, builds `Rengrave.app`
-  from `[package.metadata.bundle]`, with the identifier `net.metasim.rengrave`. The bundle has no
-  icon and is not signed or notarized, so Gatekeeper will ask before it opens. *Open question:*
-  whether to add an icon, and signing if the app is shared.
-- **Universal binaries.** Cargo builds one target at a time, so `tools/macos-universal.sh` builds
+  from `[package.metadata.bundle]`, with the identifier `net.metasim.rengrave`. The bundle has the
+  icon from `assets/icon` (also set at runtime, so a plain `cargo run` shows it) and is not signed
+  or notarized, so Gatekeeper will ask before it opens. *Open question:*
+  signing if the app is shared.
+- **Maintenance tasks.** Repository tasks are small Rust programs in the `xtask` crate, run as
+  `cargo xtask <task>` through an alias in `.cargo/config.toml`, not shell scripts. Each task is its
+  own executable, `xtask-<task>`; `xtask` only forwards to it, so tasks parse their own arguments
+  with `clap` and run commands with `xshell`.
+- **Universal binaries.** Cargo builds one target at a time, so `cargo xtask build-universal` builds
   `aarch64-apple-darwin` and `x86_64-apple-darwin`, joins the executables with `lipo`, and puts the
   universal executable into the arm64 bundle that `cargo-bundle` made, then signs it ad hoc. It
-  does not notarize. The minimum is macOS 13 (Ventura), set through `MACOSX_DEPLOYMENT_TARGET` and
+  does not notarize. `cargo xtask build-dmg` wraps the universal app in a disk image. The minimum is macOS 13 (Ventura), set through `MACOSX_DEPLOYMENT_TARGET` and
   `minimum_system_version`.
 - **Branches.** The repository now has a remote, `origin`. `main` holds only the initial commit and
   receives work through pull requests, with `develop` as the integration branch. Nothing from the

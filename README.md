@@ -55,18 +55,26 @@ cd crates/rengrave_gui && cargo bundle --release
 
 The app is written to `target/release/bundle/osx/Rengrave.app`.
 
-To build for both Apple silicon and Intel Macs, run the universal build script. It builds both
-targets (installing the Intel Rust target with `rustup` if needed), joins them with `lipo`, and
-makes a universal `Rengrave.app`; `--no-bundle` skips the app and its `cargo-bundle` requirement.
+To build for both Apple silicon and Intel Macs, use the `xtask` maintenance tasks. They build
+both targets (installing the Intel Rust target with `rustup` if needed), join them with `lipo`,
+and make a universal `Rengrave.app`; `--no-bundle` skips the app and its `cargo-bundle`
+requirement.
 
 ```bash
-tools/macos-universal.sh
+cargo xtask build-universal
 ```
 
 The results are in `target/universal/release`: `rengrave`, `rengrave-cli`, and
-`bundle/Rengrave.app`. The app is ad-hoc signed, so it runs on the machine that built it; other
-machines need a Developer ID signature and notarization. It supports macOS 13 (Ventura) and
-later; set `MACOSX_DEPLOYMENT_TARGET` to change that.
+`bundle/Rengrave.app`. To also make a disk image with the app and an Applications link, run:
+
+```bash
+cargo xtask build-dmg
+```
+
+That writes `target/universal/release/Rengrave.dmg`. The app is ad-hoc signed, so it runs on the
+machine that built it; other machines need a Developer ID signature and notarization. It supports
+macOS 13 (Ventura) and later; use `--deployment-target` to change that. `cargo xtask --help` lists
+all the tasks, including `build-icon`, which renders the icon files from the SVG source.
 
 The window shows the design, its carved area, and the tool path, recalculating after each change.
 Choose the text and font on the **Design** tab and the bit on the **Toolpath** tab, then choose

@@ -38,7 +38,7 @@ workspace = true
 [package.metadata.bundle]
 name = "Rengrave"
 identifier = "net.metasim.rengrave"
-# Built from assets/icon/rengrave-icon.svg by tools/build-icon.sh.
+# Built from assets/icon/rengrave-icon.svg by `cargo xtask build-icon`.
 icon = ["assets/icon/Rengrave.icns"]
 short_description = "Engraving and V-carve G-code generator"
 category = "public.app-category.graphics-design"

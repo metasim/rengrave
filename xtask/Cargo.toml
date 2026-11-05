@@ -1,0 +1,34 @@
+[package]
+name = "xtask"
+description = "Maintenance tasks for the repository, run as `cargo xtask <task>`"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+default-run = "xtask"
+
+[dependencies]
+anyhow = "1"
+clap = { workspace = true, features = ["env"] }
+xshell = "0.2"
+
+[lints]
+workspace = true
+
+# `xtask` forwards each task to the executable named `xtask-<task>`.
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[[bin]]
+name = "xtask-build-universal"
+path = "src/bin/build_universal.rs"
+
+[[bin]]
+name = "xtask-build-dmg"
+path = "src/bin/build_dmg.rs"
+
+[[bin]]
+name = "xtask-build-icon"
+path = "src/bin/build_icon.rs"
