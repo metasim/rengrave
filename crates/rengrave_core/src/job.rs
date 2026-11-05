@@ -6,16 +6,16 @@
 
 //! The high-level interface: settings plus loaded source glyphs.
 
+use crate::catalog::FontCatalog;
 use crate::cleanup::CleanupPaths;
 use crate::design::Design;
 use crate::error::{Error, Result};
-use crate::font::{BuiltinFont, Font};
+use crate::font::Font;
 use crate::gcode::GcodeProgram;
 use crate::progress::Progress;
 use crate::settings::{CleanupBit, CutType, InputType, Settings};
 use crate::trace::ImportedDrawing;
 use crate::vcarve::CarvePath;
-use std::path::PathBuf;
 
 /// Settings together with the font or drawing they refer to.
 #[derive(Debug, Clone, PartialEq)]
@@ -29,11 +29,20 @@ pub struct Job {
 }
 
 impl Job {
-    /// Loads the source named by `settings`.
-    pub fn load(settings: Settings) -> Result<Self> {
+    /// Loads the source named by `settings`, taking fonts from `fonts`.
+    pub fn load(settings: Settings, fonts: &FontCatalog) -> Result<Self> {
         let mut warnings = Vec::new();
         let font = match settings.input_type {
-            InputType::Text => Self::load_font(&settings)?,
+            InputType::Text => fonts.load(
+                &settings.font,
+                settings.seg_arc,
+                &Font::codes_for_text(&settings.text),
+            )?,
+            InputType::FontPage => fonts.load(
+                &settings.font,
+                settings.seg_arc,
+                &Font::codes_in(settings.font_page_codes()),
+            )?,
             InputType::Image => {
                 if settings.image_file.as_os_str().is_empty() {
                     return Err(Error::Import("no image file selected".into()));
@@ -50,37 +59,30 @@ impl Job {
         })
     }
 
-    fn load_font(settings: &Settings) -> Result<Font> {
-        let name = settings.font_file.trim();
-        if name.is_empty() {
-            return BuiltinFont::UbuntuLight.load(settings.seg_arc, settings.extended_chars);
-        }
-        if let Some(builtin) = BuiltinFont::from_name(name) {
-            return builtin.load(settings.seg_arc, settings.extended_chars);
-        }
-        let path = Self::font_path(settings);
-        Font::load_file(&path, settings.seg_arc, settings.extended_chars)
-    }
-
-    /// The path of a font file named by `settings`. Absolute names ignore the font directory.
-    pub fn font_path(settings: &Settings) -> PathBuf {
-        settings.font_dir.join(settings.font_file.trim())
-    }
-
     /// Returns `true` if changing from `old` to `new` settings requires reloading the source.
     pub fn needs_reload(old: &Settings, new: &Settings) -> bool {
         old.input_type != new.input_type
-            || old.font_dir != new.font_dir
-            || old.font_file != new.font_file
+            || old.font != new.font
+            || (new.input_type == InputType::FontPage
+                && old.font_page_codes() != new.font_page_codes())
+            || Self::characters_beyond_latin1(&old.text)
+                != Self::characters_beyond_latin1(&new.text)
             || old.image_file != new.image_file
             || old.seg_arc != new.seg_arc
-            || old.extended_chars != new.extended_chars
             || old.tracer != new.tracer
             || old.bmp_turn_policy != new.bmp_turn_policy
             || old.bmp_turd_size != new.bmp_turd_size
             || old.bmp_alpha_max != new.bmp_alpha_max
             || old.bmp_opt_tolerance != new.bmp_opt_tolerance
             || old.bmp_long_curve != new.bmp_long_curve
+    }
+
+    /// The sorted characters of `text` that a font loads on demand, beyond Latin-1.
+    fn characters_beyond_latin1(text: &str) -> Vec<char> {
+        let mut chars: Vec<char> = text.chars().filter(|&c| u32::from(c) > 255).collect();
+        chars.sort_unstable();
+        chars.dedup();
+        chars
     }
 
     /// Positions the outlines. See [`Design::layout`].
@@ -127,20 +129,80 @@ impl Job {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::{FontRef, test_support};
+
+    /// Loads with the test font, which is what `Settings::default` selects in these tests.
+    fn load(settings: Settings) -> Result<Job> {
+        let settings = Settings {
+            font: FontRef::User(test_support::FONT_NAME.into()),
+            ..settings
+        };
+        Job::load(settings, &test_support::catalog())
+    }
 
     #[test]
-    fn default_job_loads_builtin_font() {
-        let job = Job::load(Settings::default()).unwrap();
+    fn job_loads_the_selected_font() {
+        let job = load(Settings::default()).unwrap();
         assert!(job.font.glyph('F').is_some());
     }
 
     #[test]
-    fn missing_font_file_is_an_error() {
+    fn missing_font_is_an_error() {
         let settings = Settings {
-            font_file: "nope.ttf".into(),
+            font: FontRef::User("nope".into()),
             ..Settings::default()
         };
-        assert!(matches!(Job::load(settings), Err(Error::Io { .. })));
+        let err = Job::load(settings, &test_support::catalog()).unwrap_err();
+        assert!(matches!(err, Error::Font(_)), "{err}");
+    }
+
+    #[test]
+    fn a_font_page_loads_only_its_block() {
+        let settings = Settings {
+            input_type: InputType::FontPage,
+            font_block: "Basic Latin".into(),
+            ..Settings::default()
+        };
+        let job = load(settings).unwrap();
+        assert!(job.font.glyph('F').is_some());
+        assert!(job.font.glyph('\u{e9}').is_none());
+        assert!(job.font.count_in(0..=0xFF) >= job.font.glyphs.len());
+        let coverage = job.font.coverage();
+        assert_eq!(coverage.blocks[0].0.name, "Basic Latin");
+        assert!(coverage.latin > 90);
+    }
+
+    #[test]
+    fn changing_the_page_reloads_only_a_font_page() {
+        let old = Settings {
+            input_type: InputType::FontPage,
+            ..Settings::default()
+        };
+        let new = Settings {
+            font_block: "Basic Latin".into(),
+            ..old.clone()
+        };
+        assert!(Job::needs_reload(&old, &new));
+        let text = Settings {
+            input_type: InputType::Text,
+            ..old
+        };
+        let moved = Settings {
+            font_block: "Basic Latin".into(),
+            ..text.clone()
+        };
+        assert!(!Job::needs_reload(&text, &moved));
+    }
+
+    #[test]
+    fn text_beyond_latin1_is_loaded_on_demand() {
+        let settings = Settings {
+            text: "A\u{3b1}".into(),
+            ..Settings::default()
+        };
+        let job = load(settings).unwrap();
+        assert!(job.font.glyph('\u{3b1}').is_some());
+        assert!(job.font.glyph('\u{3b2}').is_none());
     }
 
     #[test]
@@ -149,7 +211,7 @@ mod tests {
             input_type: InputType::Image,
             ..Settings::default()
         };
-        assert!(matches!(Job::load(settings), Err(Error::Import(_))));
+        assert!(matches!(load(settings), Err(Error::Import(_))));
     }
 
     #[test]
@@ -172,7 +234,22 @@ mod tests {
         assert!(Job::needs_reload(
             &base,
             &Settings {
-                font_file: "Hack".into(),
+                font: FontRef::System("Hack".into()),
+                ..base.clone()
+            }
+        ));
+        // Latin-1 text is always loaded, so editing it needs no reload; other text does.
+        assert!(!Job::needs_reload(
+            &base,
+            &Settings {
+                text: "other".into(),
+                ..base.clone()
+            }
+        ));
+        assert!(Job::needs_reload(
+            &base,
+            &Settings {
+                text: "\u{3b1}".into(),
                 ..base.clone()
             }
         ));
@@ -180,7 +257,7 @@ mod tests {
 
     #[test]
     fn engrave_job_produces_program() {
-        let job = Job::load(Settings::default()).unwrap();
+        let job = load(Settings::default()).unwrap();
         let program = job.generate_gcode(&Progress::none()).unwrap();
         assert!(program.iter().any(|l| l.starts_with("G1 X")));
     }
@@ -194,7 +271,7 @@ mod tests {
             v_step_len: 0.02,
             ..Settings::default()
         };
-        let job = Job::load(settings).unwrap();
+        let job = load(settings).unwrap();
         let (design, carve) = job.calculate(&Progress::none()).unwrap();
         let carve = carve.unwrap();
         assert!(!carve.points.is_empty());
@@ -211,7 +288,7 @@ mod tests {
             text: "I".into(),
             ..Settings::default()
         };
-        let job = Job::load(settings).unwrap();
+        let job = load(settings).unwrap();
         // An engraving job has nothing to clean.
         assert!(matches!(
             job.generate_cleanup_gcode(CleanupBit::Straight, &Progress::none()),
@@ -230,7 +307,7 @@ mod tests {
             v_step_len: 0.05,
             ..Settings::default()
         };
-        let job = Job::load(settings).unwrap();
+        let job = load(settings).unwrap();
         let program = job
             .generate_cleanup_gcode(CleanupBit::Straight, &Progress::none())
             .unwrap();

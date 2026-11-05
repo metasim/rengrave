@@ -23,6 +23,7 @@ egui.workspace = true
 rfd.workspace = true
 
 [dev-dependencies]
+epaint_default_fonts.workspace = true
 egui_kittest.workspace = true
 image = { workspace = true }
 

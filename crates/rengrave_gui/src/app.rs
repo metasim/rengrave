@@ -12,12 +12,12 @@ use crate::style::Look;
 use crate::widgets::UiExt;
 use crate::worker::{Update, Worker};
 use egui::{CentralPanel, Key, KeyboardShortcut, Modifiers, Panel, RichText, Ui};
-use rengrave_core::font::{Font, extension_upper};
+use rengrave_core::font::extension_upper;
 use rengrave_core::{
-    CarvePath, CarvePoint, CleanupBit, CleanupOps, CutType, Design, GcodeProgram, InputType, Issue,
-    Justify, Settings, Units,
+    CarvePath, CarvePoint, CleanupBit, CleanupOps, CutType, Design, FontCatalog, FontCoverage,
+    FontRef, GcodeProgram, InputType, Issue, Justify, Settings, Units,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 /// How long input must pause before a recalculation starts, in seconds.
@@ -133,11 +133,16 @@ pub struct RengraveApp {
     pub preview: Preview,
     /// Simulator playback state.
     pub simulator: SimulatorView,
-    pub(crate) font_files: Vec<PathBuf>,
-    /// The directory `font_files` came from.
-    scanned_font_dir: Option<PathBuf>,
+    /// The installed fonts and the user's font library.
+    pub(crate) fonts: Arc<FontCatalog>,
     pub(crate) font_filter: String,
     show_about: bool,
+    /// Whether the application settings dialog is open.
+    pub(crate) show_app_settings: bool,
+    /// The page of the application settings dialog.
+    pub(crate) settings_page: crate::preferences::SettingsPage,
+    /// The file the application settings are kept in, if any.
+    pub(crate) app_settings_path: Option<std::path::PathBuf>,
 
     /// The most recent calculation request.
     generation: u64,
@@ -161,6 +166,8 @@ pub struct RengraveApp {
 
     error: Option<String>,
     warnings: Vec<String>,
+    /// The characters of the font of the latest layout.
+    pub(crate) font_coverage: Arc<FontCoverage>,
     /// The latest message that is not derived from the job state.
     notice: Option<Status>,
     /// Keep `notice` through the next recalculation, which it may itself have caused.
@@ -195,6 +202,20 @@ impl RengraveApp {
 
     /// Creates the application, using `dialogs` to ask for files.
     pub fn new(ctx: egui::Context, dialogs: Box<dyn FileDialogs>) -> Self {
+        let mut app = Self::with_fonts(ctx, dialogs, Arc::new(FontCatalog::with_system_fonts()));
+        if let Some(path) = rengrave_core::AppSettings::default_path() {
+            app.use_app_settings(path);
+        }
+        app
+    }
+
+    /// Creates the application with its own catalog of fonts. Tests use this to avoid depending
+    /// on the fonts of the machine.
+    pub fn with_fonts(
+        ctx: egui::Context,
+        dialogs: Box<dyn FileDialogs>,
+        fonts: Arc<FontCatalog>,
+    ) -> Self {
         Look::install(&ctx);
         let notify = ctx.clone();
         Self {
@@ -202,7 +223,7 @@ impl RengraveApp {
             settings: Self::default_settings(),
             issues: Vec::new(),
             dialogs,
-            worker: Worker::spawn(move || notify.request_repaint()),
+            worker: Worker::spawn(fonts.clone(), move || notify.request_repaint()),
             tab: Tab::Design,
             active_view: ActiveView::Preview,
             live_carve: true,
@@ -210,10 +231,12 @@ impl RengraveApp {
             gcode_selection: String::new(),
             preview: Preview::default(),
             simulator: SimulatorView::default(),
-            font_files: Vec::new(),
-            scanned_font_dir: None,
+            fonts,
             font_filter: String::new(),
             show_about: false,
+            show_app_settings: false,
+            settings_page: crate::preferences::SettingsPage::default(),
+            app_settings_path: None,
             generation: 0,
             requested: None,
             changed_at: None,
@@ -229,6 +252,7 @@ impl RengraveApp {
             gcode_cache: None,
             error: None,
             warnings: Vec::new(),
+            font_coverage: Arc::default(),
             notice: None,
             keep_notice: false,
         }
@@ -373,14 +397,6 @@ impl RengraveApp {
         });
     }
 
-    /// Keeps the list of font files in step with the font directory.
-    fn refresh_font_list(&mut self) {
-        if self.scanned_font_dir.as_ref() != Some(&self.settings.font_dir) {
-            self.font_files = Font::list_files(&self.settings.font_dir).unwrap_or_default();
-            self.scanned_font_dir = Some(self.settings.font_dir.clone());
-        }
-    }
-
     /// Discards results that no longer match the settings.
     fn clear_results(&mut self) {
         self.scene_revision += 1;
@@ -453,10 +469,14 @@ impl RengraveApp {
         }
         match update {
             Update::Layout {
-                design, warnings, ..
+                design,
+                warnings,
+                coverage,
+                ..
             } => {
                 self.design = Some(design);
                 self.warnings = warnings;
+                self.font_coverage = coverage;
                 self.gcode_cache = None;
                 self.scene_revision += 1;
             }
@@ -492,7 +512,6 @@ impl RengraveApp {
 
     /// Reacts to settings changes and finished work; called once per frame.
     fn update_state(&mut self, now: f64) {
-        self.refresh_font_list();
         while let Some(update) = self.worker.poll() {
             self.apply_update(update);
         }
@@ -710,14 +729,7 @@ impl RengraveApp {
                     format!("Unable to read {}: {e}", path.display()),
                 ),
             },
-            "CXF" | "TTF" | "OTF" => {
-                self.settings.input_type = InputType::Text;
-                self.settings.font_dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-                self.settings.font_file = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-            }
+            "CXF" | "TTF" | "OTF" | "TTC" | "OTC" => self.add_font_file(path, true),
             _ => {
                 self.settings.input_type = InputType::Image;
                 self.settings.image_file = path.to_path_buf();
@@ -740,25 +752,43 @@ impl RengraveApp {
         }
     }
 
-    /// Asks for a directory of fonts.
-    pub(crate) fn choose_font_dir(&mut self) {
-        let start = self.settings.font_dir.clone();
-        if let Some(dir) = self.dialogs.pick_folder(Some(&start)) {
-            self.settings.font_dir = dir;
+    /// Asks for a font file to add to the library.
+    pub(crate) fn add_font_dialog(&mut self, select: bool) {
+        if let Some(path) = self.dialogs.pick_file(FileKind::Font, None) {
+            self.add_font_file(&path, select);
         }
     }
 
+    /// The characters the font of the latest layout has, by Unicode block.
+    pub fn font_coverage(&self) -> &FontCoverage {
+        &self.font_coverage
+    }
+
+    /// The installed fonts and the user's font library.
+    pub fn fonts(&self) -> &Arc<FontCatalog> {
+        &self.fonts
+    }
+
+    /// Adds a font file to the user's library, and with `select`, uses it for the text.
+    pub(crate) fn add_font_file(&mut self, path: &Path, select: bool) {
+        match self.fonts.add_user_font(path, None) {
+            Ok(font) => {
+                if select {
+                    self.settings.input_type = InputType::Text;
+                    self.settings.font = FontRef::User(font.name);
+                }
+                self.save_app_settings();
+            }
+            Err(e) => self.notify(StatusLevel::Error, e.to_string()),
+        }
+    }
+
+    /// The name of the selected font, for the picker.
     pub(crate) fn font_label(&self) -> String {
-        if self.settings.font_file.trim().is_empty() {
-            rengrave_core::BuiltinFont::UbuntuLight.name().to_string()
-        } else {
-            self.settings.font_file.clone()
+        match &self.settings.font {
+            FontRef::Default => "Default".to_string(),
+            font => font.label().to_string(),
         }
-    }
-
-    /// Checks that a font file parses, so a bad selection is reported before it is used.
-    pub(crate) fn font_is_loadable(path: &Path) -> bool {
-        Font::load_file(path, 45.0, false).is_ok()
     }
 
     fn handle_shortcuts(&mut self, ui: &Ui) {
@@ -827,6 +857,7 @@ impl RengraveApp {
             .show(ui, |ui| self.main_area(ui));
 
         self.about_window(ui);
+        self.app_settings_window(ui);
         if self.busy || self.cleanup_busy {
             // The worker wakes the UI on progress, but keep cancellation responsive too.
             ui.ctx()
@@ -951,6 +982,15 @@ impl RengraveApp {
                     ui.separator();
                     if ui.menu_item(true, icons::QUIT, "Quit", None).clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+                ui.menu_button("Edit", |ui| {
+                    if ui
+                        .menu_item(true, icons::SETTINGS, "Application settings…", None)
+                        .clicked()
+                    {
+                        self.show_app_settings(crate::preferences::SettingsPage::default());
+                        ui.close();
                     }
                 });
                 ui.menu_button("View", |ui| {

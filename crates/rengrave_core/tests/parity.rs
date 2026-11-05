@@ -9,7 +9,7 @@
 //! one deliberate difference, for FluidNC, is undone before comparing.
 
 use rengrave_core::font::Font;
-use rengrave_core::{InputType, Job, Progress, Settings};
+use rengrave_core::{FontCatalog, FontRef, InputType, Job, Progress, Settings};
 use std::path::{Path, PathBuf};
 
 const ORIGINAL_HEADER: &str = "G17 G64 P0.001 M3 S3000";
@@ -44,11 +44,16 @@ fn check_case(name: &str) {
     let problems = settings.apply_settings_text(&cfg);
     assert!(problems.is_empty(), "{name}: {problems:?}");
     settings.text = text;
-    settings.font_dir = dir.clone();
+    // The reference programs read `tiny.cxf` from the font directory named in the settings file.
+    let fonts = FontCatalog::without_system_fonts();
+    fonts
+        .add_user_font(&dir.join("tiny.cxf"), Some("tiny"))
+        .unwrap();
+    settings.font = FontRef::User("tiny".into());
     if settings.input_type == InputType::Image {
         settings.image_file = dir.join(&settings.image_file);
     }
-    let job = Job::load(settings).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let job = Job::load(settings, &fonts).unwrap_or_else(|e| panic!("{name}: {e}"));
     let actual = job
         .generate_gcode(&Progress::none())
         .unwrap_or_else(|e| panic!("{name}: {e}"));

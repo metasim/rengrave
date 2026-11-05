@@ -4,10 +4,11 @@
 //! Command-line front end for `rengrave_core`: generates G-code, SVG, and DXF from text or images.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use rengrave_core::font::{BuiltinFont, Font};
+use rengrave_core::font::Font;
+use rengrave_core::unicode_blocks::UnicodeBlock;
 use rengrave_core::{
-    ArcFit, BitShape, CheckScope, CleanupBit, CutType, GcodeProgram, InputType, Job, Justify,
-    Origin, Progress, Settings, Tracer, Units,
+    AppSettings, ArcFit, BitShape, CheckScope, CleanupBit, CutType, FontCatalog, FontRef,
+    GcodeProgram, InputType, Job, Justify, Origin, Progress, Settings, Tracer, Units,
 };
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -54,10 +55,10 @@ enum Command {
     },
     /// Write the job's settings as a settings file, which `--settings` can load.
     Settings(OutputArgs),
-    /// List the built-in fonts, and the font files in a directory.
+    /// List the fonts in your library and the installed fonts, or describe one font file.
     Fonts {
-        /// Directory to search.
-        dir: Option<PathBuf>,
+        /// A font file to describe instead of listing installed fonts.
+        file: Option<PathBuf>,
     },
 }
 
@@ -148,9 +149,37 @@ struct JobArgs {
     /// Text to engrave; "|" starts a new line.
     #[arg(short, long, help_heading = "Input")]
     text: Option<String>,
-    /// Font: a .cxf/.ttf/.otf file, or a built-in name ("Ubuntu Light", "Hack").
-    #[arg(short, long, help_heading = "Input")]
+    /// Font: "system:<family>" for an installed font, or "user:<name>" for one in your library.
+    /// Without this, the system's default sans-serif font is used.
+    #[arg(short, long, value_name = "FONT", help_heading = "Input")]
     font: Option<String>,
+    /// Font file (.cxf, .ttf, .otf, .ttc) to use for this run only.
+    #[arg(
+        long,
+        value_name = "FILE",
+        help_heading = "Input",
+        conflicts_with = "font"
+    )]
+    font_file: Option<PathBuf>,
+    /// Engrave a page of the font's characters instead of text. The value is a Unicode block
+    /// name such as "Greek and Coptic", or "latin" for Basic Latin and Latin-1 Supplement.
+    #[arg(
+        long,
+        value_name = "BLOCK",
+        help_heading = "Input",
+        conflicts_with_all = ["text", "image"]
+    )]
+    font_page: Option<String>,
+    /// Page of the Unicode block to engrave with --font-page, counted from 1. Blocks with more
+    /// than 500 characters are split into pages.
+    #[arg(
+        long,
+        value_name = "N",
+        help_heading = "Input",
+        requires = "font_page",
+        value_parser = clap::value_parser!(u32).range(1..)
+    )]
+    page: Option<u32>,
     /// DXF drawing or raster image (PNG, BMP, PBM, JPEG, GIF, TIFF) to engrave instead of text.
     #[arg(
         short,
@@ -293,16 +322,23 @@ impl JobArgs {
             s.input_type = InputType::Text;
         }
         if let Some(font) = &self.font {
-            let path = Path::new(font);
-            if BuiltinFont::from_name(font).is_none() && !font.is_empty() {
-                s.font_dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-                s.font_file = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .ok_or_else(|| format!("invalid font path {font:?}"))?;
+            s.font = font.parse().map_err(|e| format!("--font: {e}"))?;
+        }
+        if let Some(path) = &self.font_file {
+            s.font = FontRef::User(Self::font_file_name(path));
+        }
+        if let Some(block) = &self.font_page {
+            s.input_type = InputType::FontPage;
+            s.font_block = if block.eq_ignore_ascii_case("latin") {
+                String::new()
             } else {
-                s.font_file.clone_from(font);
-            }
+                UnicodeBlock::all()
+                    .iter()
+                    .find(|b| b.name.eq_ignore_ascii_case(block))
+                    .map(|b| b.name.to_string())
+                    .ok_or_else(|| format!("--font-page: unknown Unicode block {block:?}"))?
+            };
+            s.font_page = self.page.map_or(0, |n| n - 1);
         }
         if let Some(image) = &self.image {
             s.image_file.clone_from(image);
@@ -416,10 +452,48 @@ impl JobArgs {
         Ok(s)
     }
 
+    /// The library name a `--font-file` is known by during a run: the file name without its
+    /// extension.
+    fn font_file_name(path: &Path) -> String {
+        path.file_stem()
+            .map_or_else(|| "font".to_string(), |s| s.to_string_lossy().into_owned())
+    }
+
+    /// The fonts this run can use. Installed fonts are scanned only when the job needs them.
+    fn font_catalog(&self, settings: &rengrave_core::Settings) -> Result<FontCatalog, String> {
+        let needs_system =
+            settings.input_type.uses_font() && !matches!(settings.font, FontRef::User(_));
+        let catalog = if needs_system {
+            FontCatalog::with_system_fonts()
+        } else {
+            FontCatalog::without_system_fonts()
+        };
+        Self::apply_app_settings(&catalog);
+        if let Some(path) = &self.font_file {
+            catalog
+                .add_user_font(path, Some(&Self::font_file_name(path)))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(catalog)
+    }
+
+    /// Reads the settings shared with the desktop application, which hold the user's fonts. A
+    /// settings file that cannot be read is reported and otherwise ignored.
+    fn apply_app_settings(catalog: &FontCatalog) {
+        let Some(path) = AppSettings::default_path() else {
+            return;
+        };
+        match AppSettings::load_from(&path) {
+            Ok(settings) => settings.apply_to(catalog),
+            Err(e) => eprintln!("warning: {e}"),
+        }
+    }
+
     fn job(&self) -> Result<Job, String> {
         let settings = self.settings()?;
         settings.ensure_valid().map_err(|e| e.to_string())?;
-        let job = Job::load(settings).map_err(|e| e.to_string())?;
+        let catalog = self.font_catalog(&settings)?;
+        let job = Job::load(settings, &catalog).map_err(|e| e.to_string())?;
         for warning in job.warnings.iter().chain(&job.settings.controller_issues()) {
             eprintln!("warning: {warning}");
         }
@@ -522,18 +596,20 @@ impl Cli {
                 let settings = out.job.settings()?;
                 out.write(&GcodeProgram::settings_file(&settings))
             }
-            Command::Fonts { dir } => {
-                for builtin in BuiltinFont::ALL {
-                    let font = builtin.load(5.0, false).map_err(|e| e.to_string())?;
-                    Self::describe_font(&format!("(built-in) {}", builtin.name()), &font);
+            Command::Fonts { file } => {
+                if let Some(path) = file {
+                    let font = Font::load_file(&path, 0, 5.0, &Font::codes_for_text(""))
+                        .map_err(|e| e.to_string())?;
+                    Self::describe_font(&path.display().to_string(), &font);
+                    return Ok(());
                 }
-                if let Some(dir) = dir {
-                    for path in Font::list_files(&dir).map_err(|e| e.to_string())? {
-                        match Font::load_file(&path, 5.0, false) {
-                            Ok(font) => Self::describe_font(&path.display().to_string(), &font),
-                            Err(e) => eprintln!("warning: {e}"),
-                        }
-                    }
+                let catalog = FontCatalog::with_system_fonts();
+                JobArgs::apply_app_settings(&catalog);
+                for font in catalog.user_fonts() {
+                    println!("user:{}\t{}", font.name, font.path.display());
+                }
+                for family in catalog.system_families() {
+                    println!("system:{family}");
                 }
                 Ok(())
             }
@@ -636,12 +712,18 @@ mod tests {
     }
 
     #[test]
-    fn font_option_splits_directory_or_names_builtin() {
-        let s = job_args(&["-f", "/fonts/x.ttf"]).settings().unwrap();
-        assert_eq!(s.font_dir, PathBuf::from("/fonts"));
-        assert_eq!(s.font_file, "x.ttf");
-        let b = job_args(&["-f", "hack"]).settings().unwrap();
-        assert_eq!(b.font_file, "hack");
+    fn font_options_select_a_library() {
+        let s = job_args(&["-f", "system:Helvetica Neue"])
+            .settings()
+            .unwrap();
+        assert_eq!(s.font, FontRef::System("Helvetica Neue".into()));
+        let u = job_args(&["-f", "user:Mine"]).settings().unwrap();
+        assert_eq!(u.font, FontRef::User("Mine".into()));
+        let file = job_args(&["--font-file", "/fonts/x.ttf"])
+            .settings()
+            .unwrap();
+        assert_eq!(file.font, FontRef::User("x".into()));
+        assert!(job_args(&["-f", "Hack"]).settings().is_err());
     }
 
     #[test]

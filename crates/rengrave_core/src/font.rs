@@ -5,14 +5,19 @@
 // Ported from `parse` of F-Engrave 1.78 (CXF fonts), which credits cxf2cnc.py by Ben Lipkowitz. The
 // TrueType code is independent of the GPL-2.0-only ttf2cxf_stream helper; see COPYRIGHT.md.
 
-//! Stroke fonts: the CXF file format, TrueType/OpenType outlines, and embedded typefaces.
+//! Stroke fonts: the CXF file format and TrueType/OpenType outlines.
 //!
 //! Every input the engine accepts, including traced images and DXF drawings, is reduced to a
 //! [`Font`] whose glyphs are lists of straight strokes.
 
 use crate::error::{Error, Result};
+use crate::unicode_blocks::UnicodeBlock;
+use skrifa::instance::{LocationRef, Size};
+use skrifa::outline::{DrawSettings, OutlinePen};
+use skrifa::{FontRef, GlyphId, MetadataProvider};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::ops::RangeInclusive;
+use std::path::Path;
 
 /// A straight stroke in font units.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -62,58 +67,54 @@ impl Glyph {
     }
 }
 
+/// The Unicode blocks a font has characters in; see [`Font::coverage`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FontCoverage {
+    /// The number of characters in Basic Latin and Latin-1 Supplement together.
+    pub latin: usize,
+    /// Every block with at least one character, in code point order, with the character count.
+    pub blocks: Vec<(&'static UnicodeBlock, usize)>,
+}
+
 /// A character set mapping Unicode code points to glyphs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Font {
-    /// Glyphs by code point, in ascending order.
+    /// Glyphs by code point, in ascending order. Only the characters that were asked for are
+    /// loaded.
     pub glyphs: BTreeMap<u32, Glyph>,
-}
-
-/// A typeface compiled into the program, available without any font files.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuiltinFont {
-    /// Ubuntu Light, a proportional sans-serif.
-    UbuntuLight,
-    /// Hack, a monospaced sans-serif.
-    Hack,
-}
-
-impl BuiltinFont {
-    /// All embedded typefaces.
-    pub const ALL: [Self; 2] = [Self::UbuntuLight, Self::Hack];
-
-    /// Display name, also the identifier accepted by [`crate::Settings::font_file`].
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::UbuntuLight => "Ubuntu Light",
-            Self::Hack => "Hack",
-        }
-    }
-
-    /// Finds an embedded typeface by its [`BuiltinFont::name`], ignoring case.
-    pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|f| f.name().eq_ignore_ascii_case(name.trim()))
-    }
-
-    const fn data(self) -> &'static [u8] {
-        match self {
-            Self::UbuntuLight => epaint_default_fonts::UBUNTU_LIGHT,
-            Self::Hack => epaint_default_fonts::HACK_REGULAR,
-        }
-    }
-
-    /// Loads the typeface, flattening curves to within `seg_arc` degrees.
-    pub fn load(self, seg_arc: f64, extended_chars: bool) -> Result<Font> {
-        Font::from_outline_font(self.data(), seg_arc, extended_chars)
-    }
+    /// Every code point the font maps to a glyph, whether loaded or not, in ascending order.
+    pub available: Vec<u32>,
 }
 
 impl Font {
     /// Returns `true` if the font contains no characters.
     pub fn is_empty(&self) -> bool {
         self.glyphs.is_empty()
+    }
+
+    /// Which Unicode blocks the font has characters in.
+    pub fn coverage(&self) -> FontCoverage {
+        let mut blocks: Vec<(&'static UnicodeBlock, usize)> = Vec::new();
+        for &code in &self.available {
+            let Some(block) = UnicodeBlock::containing(code) else {
+                continue;
+            };
+            match blocks.last_mut() {
+                Some((last, count)) if std::ptr::eq(*last, block) => *count += 1,
+                _ => blocks.push((block, 1)),
+            }
+        }
+        FontCoverage {
+            latin: self.count_in(0..=0xFF),
+            blocks,
+        }
+    }
+
+    /// The number of characters the font has among the code points in `range`.
+    pub fn count_in(&self, range: RangeInclusive<u32>) -> usize {
+        let start = self.available.partition_point(|&c| c < *range.start());
+        let end = self.available.partition_point(|&c| c <= *range.end());
+        end - start
     }
 
     /// Looks up the glyph for `ch`.
@@ -157,54 +158,62 @@ impl Font {
         if let Some(k) = key {
             font.glyphs.insert(k, Glyph { strokes });
         }
+        font.available = font.glyphs.keys().copied().collect();
         font
     }
 
-    /// Reads a TrueType or OpenType font from memory.
+    /// Reads the code points in `wanted` from face `face` of a TrueType or OpenType font in memory.
     ///
     /// Glyphs are scaled so that a capital `A` is nine units tall and curves are flattened to
-    /// within `seg_arc` degrees. Latin-1 characters are loaded unless `extended_chars` asks for
-    /// every code point in the font. Contours are normalized so outer loops run clockwise.
-    pub fn from_outline_font(data: &[u8], seg_arc: f64, extended_chars: bool) -> Result<Self> {
-        let face = ttf_parser::Face::parse(data, 0)
+    /// within `seg_arc` degrees. Contours are normalized so outer loops run clockwise. Code
+    /// points the font does not contain, or that have no outline (a space), are skipped. `face`
+    /// selects a font within a collection (`.ttc`) and is zero for a single font.
+    pub fn from_outline_font(data: &[u8], face: u32, seg_arc: f64, wanted: &[u32]) -> Result<Self> {
+        let face = FontRef::from_index(data, face)
             .map_err(|e| Error::Font(format!("unable to parse font: {e}")))?;
         let tol = seg_arc.max(0.01).to_radians();
-
-        let probe = face.glyph_index('A').and_then(|id| {
+        let charmap = face.charmap();
+        let outlines = face.outline_glyphs();
+        let draw = |id: GlyphId| -> Option<Vec<Stroke>> {
             let mut sink = OutlineSink::new(tol);
-            face.outline_glyph(id, &mut sink)?;
-            let y_max = sink
-                .strokes
+            outlines
+                .get(id)?
+                .draw(
+                    DrawSettings::unhinted(Size::unscaled(), LocationRef::default()),
+                    &mut sink,
+                )
+                .ok()?;
+            (!sink.strokes.is_empty()).then_some(sink.strokes)
+        };
+
+        let probe = charmap.map('A').and_then(draw).and_then(|strokes| {
+            let y_max = strokes
                 .iter()
                 .map(|s| s.y1.max(s.y2))
                 .fold(f64::NEG_INFINITY, f64::max);
             (y_max > 0.0).then_some(y_max)
         });
-        let cap_height = probe.unwrap_or_else(|| f64::from(face.units_per_em()) * 0.7);
+        let units_per_em = face
+            .metrics(Size::unscaled(), LocationRef::default())
+            .units_per_em;
+        let cap_height = probe.unwrap_or_else(|| f64::from(units_per_em) * 0.7);
         let factor = 9.0 / cap_height;
 
-        let mut font = Self::default();
-        let mut chars: Vec<u32> = Vec::new();
-        if extended_chars {
-            if let Some(cmap) = face.tables().cmap {
-                for sub in cmap.subtables.into_iter().filter(|s| s.is_unicode()) {
-                    sub.codepoints(|c| chars.push(c));
-                }
-            }
-            chars.sort_unstable();
-            chars.dedup();
-        } else {
-            chars.extend(1..256);
-        }
-        for code in chars {
-            let Some(id) = char::from_u32(code).and_then(|c| face.glyph_index(c)) else {
+        let mut available: Vec<u32> = charmap
+            .mappings()
+            .map(|(code, _)| code)
+            .filter(|&code| code != 0)
+            .collect();
+        available.sort_unstable();
+        available.dedup();
+        let mut font = Self {
+            available,
+            ..Self::default()
+        };
+        for &code in wanted {
+            let Some(mut strokes) = charmap.map(code).and_then(draw) else {
                 continue;
             };
-            let mut sink = OutlineSink::new(tol);
-            if face.outline_glyph(id, &mut sink).is_none() {
-                continue;
-            }
-            let mut strokes = sink.strokes;
             Font::normalize_winding(&mut strokes);
             for s in &mut strokes {
                 s.x1 *= factor;
@@ -215,39 +224,46 @@ impl Font {
             font.glyphs.insert(code, Glyph { strokes });
         }
         if font.is_empty() {
-            return Err(Error::Font("font contains no outline glyphs".into()));
+            return Err(Error::Font(
+                "font has no outlines for the requested characters".into(),
+            ));
         }
         Ok(font)
     }
 
-    /// Loads a font from a `.cxf`, `.ttf`, or `.otf` file.
-    pub fn load_file(path: &Path, seg_arc: f64, extended_chars: bool) -> Result<Self> {
+    /// The code points in `range`, without the null character.
+    pub fn codes_in(range: RangeInclusive<u32>) -> Vec<u32> {
+        range.filter(|&c| c != 0).collect()
+    }
+
+    /// The code points to load by default: Latin-1 and every character of `text`.
+    ///
+    /// Loading only what the text needs keeps large fonts, such as CJK fonts with tens of
+    /// thousands of glyphs, cheap to use.
+    pub fn codes_for_text(text: &str) -> Vec<u32> {
+        let mut codes: Vec<u32> = (1..256).chain(text.chars().map(u32::from)).collect();
+        codes.sort_unstable();
+        codes.dedup();
+        codes
+    }
+
+    /// Loads a font from a `.cxf`, `.ttf`, `.otf`, or `.ttc` file.
+    ///
+    /// `face` selects a font within a collection and is ignored for other formats. `wanted` is
+    /// ignored for `.cxf`, which is always read whole.
+    pub fn load_file(path: &Path, face: u32, seg_arc: f64, wanted: &[u32]) -> Result<Self> {
         let bytes = std::fs::read(path).map_err(|source| Error::Io {
             path: path.to_path_buf(),
             source,
         })?;
         match extension_upper(path).as_str() {
             "CXF" => Ok(Self::parse_cxf(&String::from_utf8_lossy(&bytes), seg_arc)),
-            "TTF" | "OTF" => Self::from_outline_font(&bytes, seg_arc, extended_chars),
+            "TTF" | "OTF" | "TTC" | "OTC" => Self::from_outline_font(&bytes, face, seg_arc, wanted),
             other => Err(Error::Font(format!(
                 "unsupported font file type {other:?}: {}",
                 path.display()
             ))),
         }
-    }
-
-    /// Lists the `.cxf`, `.ttf`, and `.otf` files directly inside `dir`, sorted by name.
-    pub fn list_files(dir: &Path) -> Result<Vec<PathBuf>> {
-        let entries = std::fs::read_dir(dir).map_err(|source| Error::Io {
-            path: dir.to_path_buf(),
-            source,
-        })?;
-        let mut files: Vec<PathBuf> = entries
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| matches!(extension_upper(p).as_str(), "CXF" | "TTF" | "OTF"))
-            .collect();
-        files.sort();
-        Ok(files)
     }
 
     /// Wraps a single drawing (a traced image or DXF) as a one-character font.
@@ -256,6 +272,7 @@ impl Font {
     pub fn from_drawing(strokes: Vec<Stroke>) -> Self {
         let mut font = Self::default();
         font.glyphs.insert(IMAGE_GLYPH as u32, Glyph { strokes });
+        font.available = vec![IMAGE_GLYPH as u32];
         font
     }
 }
@@ -323,7 +340,7 @@ impl OutlineSink {
     }
 }
 
-impl ttf_parser::OutlineBuilder for OutlineSink {
+impl OutlinePen for OutlineSink {
     fn move_to(&mut self, x: f32, y: f32) {
         self.start = (f64::from(x), f64::from(y));
         self.cur = self.start;
@@ -543,10 +560,22 @@ mod tests {
             / 2.0
     }
 
+    /// Loads one of the typefaces that egui ships, which tests use as fixtures.
+    fn fixture(data: &'static [u8], seg_arc: f64, wanted: &[u32]) -> Font {
+        Font::from_outline_font(data, 0, seg_arc, wanted).unwrap()
+    }
+
+    fn latin1() -> Vec<u32> {
+        Font::codes_for_text("")
+    }
+
     #[test]
-    fn builtin_fonts_scale_capital_to_nine_units() {
-        for builtin in BuiltinFont::ALL {
-            let font = builtin.load(5.0, false).unwrap();
+    fn outline_fonts_scale_capital_to_nine_units() {
+        for data in [
+            epaint_default_fonts::UBUNTU_LIGHT,
+            epaint_default_fonts::HACK_REGULAR,
+        ] {
+            let font = fixture(data, 5.0, &latin1());
             let a = font.glyph('A').unwrap();
             assert_abs_diff_eq!(a.y_max(), 9.0, epsilon = 1e-9);
             assert!(font.glyph('z').is_some());
@@ -555,7 +584,7 @@ mod tests {
 
     #[test]
     fn outline_contours_close_and_wind_clockwise() {
-        let font = BuiltinFont::UbuntuLight.load(5.0, false).unwrap();
+        let font = fixture(epaint_default_fonts::UBUNTU_LIGHT, 5.0, &latin1());
         for ch in ['A', 'O', 'g', '8'] {
             let strokes = &font.glyph(ch).unwrap().strokes;
             assert!(
@@ -615,27 +644,33 @@ mod tests {
 
     #[test]
     fn finer_tolerance_gives_more_strokes() {
-        let coarse = BuiltinFont::UbuntuLight.load(45.0, false).unwrap();
-        let fine = BuiltinFont::UbuntuLight.load(2.0, false).unwrap();
+        let ubuntu = epaint_default_fonts::UBUNTU_LIGHT;
+        let coarse = fixture(ubuntu, 45.0, &latin1());
+        let fine = fixture(ubuntu, 2.0, &latin1());
         let count = |f: &Font| f.glyph('O').unwrap().strokes.len();
         assert!(count(&fine) > count(&coarse));
     }
 
     #[test]
-    fn extended_loading_adds_code_points() {
-        let latin = BuiltinFont::UbuntuLight.load(30.0, false).unwrap();
-        let all = BuiltinFont::UbuntuLight.load(30.0, true).unwrap();
-        assert!(all.glyphs.len() > latin.glyphs.len());
+    fn only_wanted_code_points_are_loaded() {
+        let ubuntu = epaint_default_fonts::UBUNTU_LIGHT;
+        let few = fixture(ubuntu, 30.0, &Font::codes_for_text(""));
+        assert_eq!(few.glyphs.len(), 189);
+        let more = fixture(ubuntu, 30.0, &Font::codes_for_text("A\u{3b1}\u{3b2}"));
+        assert_eq!(more.glyphs.len(), few.glyphs.len() + 2);
+        assert!(more.glyph('\u{3b1}').is_some());
+    }
+
+    #[test]
+    fn codes_for_text_are_sorted_and_unique() {
+        let codes = Font::codes_for_text("zz\u{3b1}a");
+        assert!(codes.windows(2).all(|w| w[0] < w[1]));
+        assert_eq!(codes.first(), Some(&1));
+        assert_eq!(codes.last(), Some(&0x3b1));
     }
 
     #[test]
     fn invalid_font_data_is_an_error() {
-        assert!(Font::from_outline_font(b"not a font", 5.0, false).is_err());
-    }
-
-    #[test]
-    fn builtin_lookup_ignores_case() {
-        assert_eq!(BuiltinFont::from_name(" hack "), Some(BuiltinFont::Hack));
-        assert_eq!(BuiltinFont::from_name("nope"), None);
+        assert!(Font::from_outline_font(b"not a font", 0, 5.0, &[65]).is_err());
     }
 }

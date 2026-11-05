@@ -707,20 +707,26 @@ mod tests {
 
     #[test]
     fn tool_paths_of_real_glyphs_draw_within_their_extent() {
-        use rengrave_core::{BuiltinFont, InputType, Job, Progress, Units};
+        use rengrave_core::{FontCatalog, FontRef, InputType, Job, Progress, Units};
         let settings = Settings {
-            input_type: InputType::Text,
+            input_type: InputType::FontPage,
             cut_type: CutType::VCarve,
-            font_file: BuiltinFont::Hack.name().into(),
-            extended_chars: true,
-            show_font_index: true,
+            font: FontRef::User("Hack".into()),
             ..Settings::with_units(Units::Millimeters)
         };
-        let job = Job::load(Settings {
-            y_scale: 25.4,
-            v_step_len: 0.254,
-            ..settings
-        })
+        let font_file =
+            std::env::temp_dir().join(format!("rengrave_preview_{}.ttf", std::process::id()));
+        std::fs::write(&font_file, epaint_default_fonts::HACK_REGULAR).unwrap();
+        let fonts = FontCatalog::without_system_fonts();
+        fonts.add_user_font(&font_file, Some("Hack")).unwrap();
+        let job = Job::load(
+            Settings {
+                y_scale: 25.4,
+                v_step_len: 0.254,
+                ..settings
+            },
+            &fonts,
+        )
         .unwrap();
         let (design, carve) = job.calculate(&Progress::none()).unwrap();
         let carve = carve.unwrap();

@@ -10,9 +10,12 @@ use egui::Key;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::{Harness, HarnessBuilder};
 use rengrave_core::{
-    ArcFit, BitShape, CleanupBit, CutType, InputType, Justify, Origin, Settings, Units,
+    ArcFit, BitShape, CleanupBit, CutType, FontCatalog, FontRef, InputType, Justify, Origin,
+    Settings, Units,
 };
-use rengrave_gui::{ActiveView, FileDialogs, FileKind, RengraveApp, StatusLevel, Tab};
+use rengrave_gui::{
+    ActiveView, FileDialogs, FileKind, RengraveApp, SettingsPage, StatusLevel, Tab,
+};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -64,11 +67,31 @@ fn builder() -> HarnessBuilder<RengraveApp> {
     Harness::builder().with_size(egui::vec2(1200.0, 900.0))
 }
 
+/// Fonts for tests, so that they do not depend on the fonts of the machine: the library holds
+/// "Hack", which egui ships.
+fn test_fonts() -> Arc<FontCatalog> {
+    static FILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let file = FILE.get_or_init(|| {
+        let path =
+            std::env::temp_dir().join(format!("rengrave_ui_test_{}.ttf", std::process::id()));
+        std::fs::write(&path, epaint_default_fonts::HACK_REGULAR).unwrap();
+        path
+    });
+    let fonts = FontCatalog::without_system_fonts();
+    fonts.add_user_font(file, Some("Hack")).unwrap();
+    Arc::new(fonts)
+}
+
 fn harness_with(settings: impl FnOnce(&mut Settings)) -> (Harness<'static, RengraveApp>, Answers) {
     let answers = Answers::default();
     let dialogs = Box::new(answers.clone());
-    let mut slot = Some(RengraveApp::new(egui::Context::default(), dialogs));
+    let mut slot = Some(RengraveApp::with_fonts(
+        egui::Context::default(),
+        dialogs,
+        test_fonts(),
+    ));
     if let Some(app) = slot.as_mut() {
+        app.settings.font = FontRef::User("Hack".into());
         // Most tests were written for inches, which also keeps the step small.
         app.settings.set_units(Units::Inches);
         // Keep calculations small so that tests stay quick.
@@ -203,7 +226,7 @@ fn starts_and_calculates_default_job() {
 
 #[test]
 fn every_tab_renders_in_every_mode() {
-    for input in [InputType::Text, InputType::Image] {
+    for input in [InputType::Text, InputType::FontPage, InputType::Image] {
         for cut in [CutType::VCarve, CutType::Engrave] {
             for bit in [BitShape::VBit, BitShape::Ball, BitShape::Flat] {
                 for units in [Units::Inches, Units::Millimeters] {
@@ -488,32 +511,124 @@ fn write_pbm(path: &Path) {
 
 #[test]
 fn font_can_be_chosen_from_the_list() {
-    let (mut harness, _) =
-        harness_with(|s| s.font_dir = fixture("tiny.cxf").parent().unwrap().into());
+    let (mut harness, _) = harness();
+    harness
+        .state()
+        .fonts()
+        .add_user_font(&fixture("tiny.cxf"), Some("tiny"))
+        .unwrap();
     click(&mut harness, "Font");
-    click(&mut harness, "Hack (built in)");
-    settle(&mut harness);
-    assert_eq!(harness.state().settings.font_file, "Hack");
-    harness.get_by_label("Font").click();
-    harness.run_steps(2);
-    click(&mut harness, "tiny.cxf");
+    click(&mut harness, "tiny");
     settle(&mut harness);
     let app = harness.state();
-    assert_eq!(app.settings.font_file, "tiny.cxf");
+    assert_eq!(app.settings.font, FontRef::User("tiny".into()));
     assert_eq!(
         app.status().level,
         StatusLevel::Warning,
         "b is not in the fixture font"
     );
+    harness.get_by_label("Font").click();
+    harness.run_steps(2);
+    click(&mut harness, "Hack");
+    settle(&mut harness);
+    assert_eq!(harness.state().settings.font, FontRef::User("Hack".into()));
 }
 
 #[test]
-fn folder_button_rescans_fonts() {
-    let (mut harness, answers) = harness();
-    answers.answer_open(fixture("tiny.cxf").parent().unwrap());
-    click(&mut harness, "Folder…");
+fn font_page_shows_a_block_the_font_covers() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "Font Page");
+    settle(&mut harness);
+    assert_eq!(harness.state().settings.input_type, InputType::FontPage);
+    assert!(harness.state().design().is_some());
+    let greek = harness
+        .state()
+        .font_coverage()
+        .blocks
+        .iter()
+        .find(|(b, _)| b.name == "Greek and Coptic")
+        .map(|(_, n)| *n)
+        .expect("Hack has Greek letters");
+    click(&mut harness, "Characters");
+    click(&mut harness, &format!("Greek and Coptic ({greek})"));
+    settle(&mut harness);
+    let app = harness.state();
+    assert_eq!(app.settings.font_block, "Greek and Coptic");
+    assert_eq!(app.settings.font_page, 0);
+    assert_eq!(app.status().level, StatusLevel::Info);
+    assert!(app.design().is_some());
+}
+
+#[test]
+fn manage_fonts_opens_the_settings_dialog_on_the_fonts_page() {
+    let (mut harness, _) = harness();
     click(&mut harness, "Font");
-    assert!(harness.query_by_label("tiny.cxf").is_some());
+    click(&mut harness, "Manage fonts…");
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Application settings").is_some());
+    assert!(harness.query_by_label("Your fonts").is_some());
+}
+
+#[test]
+fn fonts_are_added_and_removed_in_the_settings_dialog_and_saved() {
+    let (mut harness, answers) = harness();
+    let dir = std::env::temp_dir().join(format!("rengrave_ui_settings_{}", std::process::id()));
+    let file = dir.join("settings.yaml");
+    // The settings file holds the library, so start it with the font the job uses.
+    let hack = harness.state().fonts().user_fonts()[0].path.clone();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        &file,
+        format!(
+            "user_fonts:\n  - name: Hack\n    path: {}\n",
+            hack.display()
+        ),
+    )
+    .unwrap();
+    harness.state_mut().use_app_settings(file.clone());
+    harness.state_mut().show_app_settings(SettingsPage::Fonts);
+    harness.run_steps(2);
+
+    answers.answer_open(&fixture("tiny.cxf"));
+    click(&mut harness, "Add font file…");
+    settle(&mut harness);
+    let names = |h: &Harness<'_, RengraveApp>| -> Vec<String> {
+        h.state()
+            .fonts()
+            .user_fonts()
+            .into_iter()
+            .map(|f| f.name)
+            .collect()
+    };
+    assert_eq!(names(&harness), ["Hack", "tiny"]);
+    assert_eq!(
+        harness.state().settings.font,
+        FontRef::User("Hack".into()),
+        "adding in the dialog does not change the job's font"
+    );
+    let saved = std::fs::read_to_string(&file).unwrap();
+    assert!(saved.contains("tiny"), "{saved}");
+
+    harness.get_all_by_label("Remove").nth(1).unwrap().click();
+    harness.run_steps(2);
+    assert_eq!(names(&harness), ["Hack"]);
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("tiny"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn dropping_a_font_file_adds_and_selects_it() {
+    let (mut harness, _) = harness();
+    harness.state_mut().open_path(&fixture("tiny.cxf"));
+    assert_eq!(harness.state().settings.font, FontRef::User("tiny".into()));
+    assert!(
+        harness
+            .state()
+            .fonts()
+            .user_fonts()
+            .iter()
+            .any(|f| f.name == "tiny")
+    );
 }
 
 #[test]
@@ -555,9 +670,9 @@ fn invalid_value_blocks_output_and_explains_why() {
 
 #[test]
 fn missing_font_reports_an_error_then_recovers() {
-    let (mut harness, _) = harness_with(|s| s.font_file = "missing.ttf".into());
+    let (mut harness, _) = harness_with(|s| s.font = FontRef::User("missing".into()));
     assert_eq!(harness.state().status().level, StatusLevel::Error);
-    harness.state_mut().settings.font_file = "Hack".into();
+    harness.state_mut().settings.font = FontRef::User("Hack".into());
     harness.run_steps(1);
     settle(&mut harness);
     assert_eq!(harness.state().status().level, StatusLevel::Info);
@@ -742,7 +857,9 @@ fn save_button_writes_program_matching_core() {
     assert_eq!(answers.last_suggestion().unwrap(), "Ab.ngc");
 
     let expected = {
-        let job = rengrave_core::Job::load(harness.state().settings.clone()).unwrap();
+        let job =
+            rengrave_core::Job::load(harness.state().settings.clone(), harness.state().fonts())
+                .unwrap();
         job.generate_gcode(&rengrave_core::Progress::none())
             .unwrap()
             .join("\n")
@@ -869,7 +986,7 @@ fn dropping_a_file_opens_it() {
 fn opened_file_is_routed_by_type() {
     let (mut harness, _) = harness();
     harness.state_mut().open_path(&fixture("tiny.cxf"));
-    assert_eq!(harness.state().settings.font_file, "tiny.cxf");
+    assert_eq!(harness.state().settings.font, FontRef::User("tiny".into()));
     harness.state_mut().open_path(&fixture("drawing.dxf"));
     assert_eq!(harness.state().settings.input_type, InputType::Image);
     harness.run_steps(1);
@@ -1686,7 +1803,8 @@ fn persistence_text_restores_settings() {
     let (harness, _) = harness_with(|s| s.text = "persist".into());
     let text = harness.state().settings_text();
     let answers = Answers::default();
-    let mut restored = RengraveApp::new(egui::Context::default(), Box::new(answers));
+    let mut restored =
+        RengraveApp::with_fonts(egui::Context::default(), Box::new(answers), test_fonts());
     restored.restore_settings_text(&text);
     assert_eq!(restored.settings.text, "persist");
 }

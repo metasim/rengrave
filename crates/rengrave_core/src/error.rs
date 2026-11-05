@@ -31,6 +31,14 @@ pub enum Error {
     /// A program could not be simulated.
     #[error("simulation error: {0}")]
     Simulation(String),
+    /// The application settings file could not be understood.
+    #[error("application settings {}: {message}", path.display())]
+    AppSettings {
+        /// The file involved.
+        path: PathBuf,
+        /// What is wrong with it.
+        message: String,
+    },
     /// The operation was canceled through its [`crate::Progress`] handle.
     #[error("calculation canceled")]
     Canceled,

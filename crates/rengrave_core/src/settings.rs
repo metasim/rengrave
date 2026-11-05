@@ -11,7 +11,10 @@
 //! `(fengrave_set NAME VALUE)` comment format, so settings files and G-code produced by
 //! F-Engrave can be loaded and the other way around.
 
+use crate::catalog::FontRef;
 use crate::geom::round_significant;
+use crate::unicode_blocks::UnicodeBlock;
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -78,10 +81,19 @@ named_enum!(
     InputType {
         /// Text in the selected font.
         Text => "text",
+        /// A page of the characters in the selected font.
+        FontPage => "font-page",
         /// A DXF drawing or a traced raster image.
         Image => "image",
     }
 );
+impl InputType {
+    /// Returns `true` if the design is made of font characters rather than a drawing.
+    pub const fn uses_font(self) -> bool {
+        matches!(self, Self::Text | Self::FontPage)
+    }
+}
+
 named_enum!(
     /// Tool profile used for V-carving.
     BitShape {
@@ -263,16 +275,15 @@ pub struct Settings {
     pub input_type: InputType,
     /// The text to engrave; `\n` separates lines.
     pub text: String,
-    /// Directory containing font files.
-    pub font_dir: PathBuf,
-    /// Font file name within `font_dir`, or a built-in font name. Empty uses the default.
-    pub font_file: String,
+    /// The font for text input.
+    pub font: FontRef,
     /// Image or DXF file for image input.
     pub image_file: PathBuf,
-    /// Load every code point of a font instead of Latin-1 only.
-    pub extended_chars: bool,
-    /// Lay out every character of the font instead of `text`.
-    pub show_font_index: bool,
+    /// The Unicode block shown by [`InputType::FontPage`]; empty for Basic Latin and Latin-1
+    /// Supplement together.
+    pub font_block: String,
+    /// The page of `font_block` shown, counted from zero; see [`UnicodeBlock::page_count`].
+    pub font_page: u32,
 
     // ---- Size and spacing
     /// Height of a line of text, or of the image; a percentage when `use_image_size` is set.
@@ -418,11 +429,10 @@ impl Default for Settings {
         Self {
             input_type: InputType::Text,
             text: "F-Engrave".into(),
-            font_dir: PathBuf::from("fonts"),
-            font_file: String::new(),
+            font: FontRef::Default,
             image_file: PathBuf::new(),
-            extended_chars: false,
-            show_font_index: false,
+            font_block: String::new(),
+            font_page: 0,
             y_scale: 2.0,
             x_scale: 100.0,
             use_image_size: false,
@@ -499,6 +509,13 @@ pub struct Issue {
 }
 
 impl Settings {
+    /// The code points of the page [`InputType::FontPage`] shows, clamped to the block's pages.
+    pub fn font_page_codes(&self) -> RangeInclusive<u32> {
+        UnicodeBlock::named(&self.font_block).map_or(0..=0xFF, |block| {
+            block.page_codes(self.font_page.min(block.page_count() - 1))
+        })
+    }
+
     /// Default settings in the requested units, with lengths at sensible metric values.
     pub fn with_units(units: Units) -> Self {
         let mut settings = Self::default();
@@ -521,7 +538,7 @@ impl Settings {
                 issues.push(Issue { field, message });
             }
         };
-        let is_text = self.input_type == InputType::Text;
+        let is_text = self.input_type.uses_font();
         let is_carve = self.cut_type == CutType::VCarve;
 
         check(
@@ -794,7 +811,7 @@ impl Settings {
     /// The direction the carve runs, after the transformations that reverse it.
     pub(crate) fn effective_flop(&self, for_cleanup: bool) -> bool {
         let mut flop = self.v_flop;
-        if self.input_type == InputType::Text && !for_cleanup {
+        if self.input_type.uses_font() && !for_cleanup {
             flop ^= self.add_box;
             flop ^= self.mirror;
             flop ^= self.flip;
@@ -959,7 +976,6 @@ impl Settings {
         set("inlay", flag(self.inlay).to_string());
         set("bmp_long", flag(self.bmp_long_curve).to_string());
         set("var_dis", flag(self.disable_variables).to_string());
-        set("ext_char", flag(self.extended_chars).to_string());
         set("useIMGsize", flag(self.use_image_size).to_string());
         set("no_comments", flag(self.no_comments).to_string());
         set("plotbox", flag(self.add_box).to_string());
@@ -985,7 +1001,9 @@ impl Settings {
         set("accuracy", self.accuracy.to_string());
         set("FEED", self.feed.to_string());
         set("PLUNGE", self.plunge.to_string());
-        set("fontfile", format!("\"{}\"", self.font_file));
+        set("font", format!("\"{}\"", self.font));
+        set("font_block", format!("\"{}\"", self.font_block));
+        set("font_page", self.font_page.to_string());
         set("H_CALC", self.height_calc.to_string());
         set("boxgap", self.box_gap.to_string());
         set("cut_type", self.cut_type.to_string());
@@ -1004,7 +1022,6 @@ impl Settings {
         set("bmp_turds", self.bmp_turd_size.to_string());
         set("bmp_alpha", self.bmp_alpha_max.to_string());
         set("bmp_optto", self.bmp_opt_tolerance.to_string());
-        set("fontdir", format!("\"{}\"", self.font_dir.display()));
         set("gpre", self.g_pre.clone());
         set("gpost", self.g_post.clone());
         set("imagefile", format!("\"{}\"", self.image_file.display()));
@@ -1112,7 +1129,8 @@ impl Settings {
             "inlay" => self.inlay = flag(value)?,
             "bmp_long" => self.bmp_long_curve = flag(value)?,
             "var_dis" => self.disable_variables = flag(value)?,
-            "ext_char" => self.extended_chars = flag(value)?,
+            // Settings written by F-Engrave name font files, which this program does not use.
+            "ext_char" | "fontfile" | "fontdir" => {}
             "useIMGsize" => self.use_image_size = flag(value)?,
             "no_comments" => self.no_comments = flag(value)?,
             "plotbox" => {
@@ -1148,7 +1166,9 @@ impl Settings {
             "accuracy" => self.accuracy = num(value)?,
             "FEED" => self.feed = num(value)?,
             "PLUNGE" => self.plunge = num(value)?,
-            "fontfile" => self.font_file = quoted(value).to_string(),
+            "font" => self.font = quoted(value).parse()?,
+            "font_block" => self.font_block = quoted(value).to_string(),
+            "font_page" => self.font_page = num(value)? as u32,
             "H_CALC" => self.height_calc = value.parse()?,
             "boxgap" => self.box_gap = num(value)?,
             "cut_type" => self.cut_type = value.parse()?,
@@ -1167,7 +1187,6 @@ impl Settings {
             "bmp_turds" => self.bmp_turd_size = num(value)?,
             "bmp_alpha" => self.bmp_alpha_max = num(value)?,
             "bmp_optto" => self.bmp_opt_tolerance = num(value)?,
-            "fontdir" => self.font_dir = PathBuf::from(quoted(value)),
             "gpre" => self.g_pre = value.to_string(),
             "gpost" => self.g_post = value.to_string(),
             "imagefile" => self.image_file = PathBuf::from(quoted(value)),
@@ -1599,10 +1618,11 @@ mod tests {
     fn settings_round_trip() {
         let original = Settings {
             text: "Héllo\nWörld, a long string of text".into(),
-            font_file: "some font.ttf".into(),
-            font_dir: PathBuf::from("/a b/c"),
+            font: FontRef::System("Some Font".into()),
             image_file: PathBuf::from("/x/y z.dxf"),
-            input_type: InputType::Image,
+            input_type: InputType::FontPage,
+            font_block: "Greek and Coptic".into(),
+            font_page: 1,
             cut_type: CutType::VCarve,
             bit_shape: BitShape::Ball,
             arc_fit: ArcFit::Radius,
@@ -1636,6 +1656,17 @@ mod tests {
         let problems = restored.apply_settings_text(&text);
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(restored, original);
+    }
+
+    #[test]
+    fn font_page_defaults_to_latin_and_clamps_the_page() {
+        let mut s = Settings::default();
+        assert_eq!(s.font_page_codes(), 0..=0xFF);
+        s.font_block = "Basic Latin".into();
+        s.font_page = 9;
+        assert_eq!(s.font_page_codes(), 0..=0x7F);
+        s.font_block = "No Such Block".into();
+        assert_eq!(s.font_page_codes(), 0..=0xFF);
     }
 
     #[test]
