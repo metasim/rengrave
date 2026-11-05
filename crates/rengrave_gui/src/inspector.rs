@@ -430,6 +430,7 @@ impl RengraveApp {
             issues: &issues,
             length_unit: unit,
         };
+        let shaped = self.font_coverage.shaped;
         let s = &mut self.settings;
         ui.form_grid("size_grid", |ui| {
             form.number(
@@ -510,44 +511,71 @@ impl RengraveApp {
                     ],
                 );
                 ui.end_row();
+                if s.input_type == InputType::Text {
+                    ui.add_enabled_ui(shaped, |ui| {
+                        form.check(
+                            ui,
+                            "Ligatures",
+                            "Replace certain letter sequences, such as fi, fl, or ffi, with the single joined glyph the font designs for them. Turn off to engrave each letter separately. Applies to TrueType and OpenType fonts, not stroke fonts.",
+                            &mut s.ligatures,
+                        );
+                    });
+                }
             }
         });
     }
 
-    /// Adjustments to the spacing that the font and its shaper set; rarely needed for fonts.
+    /// Kerning, and the spacing that applies when the font's own spacing is not used.
     fn spacing_section(&mut self, ui: &mut Ui) {
-        ui.weak(
-            "TrueType and OpenType fonts keep their own spacing and kerning at the default values.",
-        );
+        let shaped = self.font_coverage.shaped && self.settings.input_type == InputType::Text;
         let issues = self.issues.clone();
         let mut form = Form {
             issues: &issues,
             length_unit: self.unit(),
         };
         let s = &mut self.settings;
-        ui.form_grid("spacing_grid", |ui| {
-            form.number(
+        if s.input_type == InputType::Text {
+            ui.form_grid("kerning_grid", |ui| {
+                ui.add_enabled_ui(shaped, |ui| {
+                    form.check(
+                        ui,
+                        "Kerning",
+                        "Use the font's own spacing, including the adjustments that set pairs such as AV or To closer together than their letters alone would be. Turn off to set the spacing yourself with Character spacing and Word spacing below. Applies to TrueType and OpenType fonts, not stroke fonts.",
+                        &mut s.kerning,
+                    );
+                });
+            });
+        }
+        // A shaped font keeps its own spacing while kerning is on.
+        let spacing_applies = !(shaped && s.kerning);
+        if !spacing_applies {
+            ui.weak("Turn off kerning to set the spacing yourself.");
+        }
+        ui.add_enabled_ui(spacing_applies, |ui| {
+            ui.form_grid("spacing_grid", |ui| {
+                form.number(
                     ui,
                     Number {
                         label: "Character spacing",
                         field: "char_space",
-                        tip: "Gap between characters, as a percentage of the widest character. For TrueType and OpenType fonts, 25% keeps the font's own spacing; more or less loosens or tightens it.",
+                        tip: "Gap between characters, as a percentage of the widest character. For TrueType and OpenType fonts without kerning, 25% keeps the font's own spacing; more or less loosens or tightens it.",
                         suffix: PERCENT,
                         speed: 0.5,
                     },
                     &mut s.char_space,
                 );
-            form.number(
+                form.number(
                     ui,
                     Number {
                         label: "Word spacing",
                         field: "word_space",
-                        tip: "Width of a space, as a percentage of the widest character. For TrueType and OpenType fonts, 100% is the font's own space.",
+                        tip: "Width of a space, as a percentage of the widest character. For TrueType and OpenType fonts without kerning, 100% is the font's own space.",
                         suffix: PERCENT,
                         speed: 0.5,
                     },
                     &mut s.word_space,
                 );
+            });
         });
     }
 

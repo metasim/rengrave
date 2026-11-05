@@ -159,19 +159,57 @@ impl SystemFonts {
         })
     }
 
+    /// The face of `family` closest to regular weight and style that has letters.
+    ///
+    /// Some families include faces of ornaments or symbols that match "regular" as well as the
+    /// text face does, as Hoefler Text does; a face whose table has no `A` or `a` is passed over
+    /// unless every face lacks them, as in a symbol font.
     fn face_of(
         cache: &mut fontique::SourceCache,
         family: &fontique::FamilyInfo,
     ) -> Option<(fontique::Blob<u8>, u32)> {
-        let face = family
-            .match_font(
+        let best = family
+            .match_index(
                 fontique::FontWidth::NORMAL,
                 fontique::FontStyle::Normal,
                 fontique::FontWeight::NORMAL,
                 false,
             )
-            .or_else(|| family.default_font())?;
-        Some((face.load(Some(cache))?, face.index()))
+            .or(Some(family.default_font_index()))?;
+        let fonts = family.fonts();
+        let mut order: Vec<usize> = (0..fonts.len()).filter(|&i| i != best).collect();
+        order.sort_by(|&a, &b| {
+            let rank = |i: usize| {
+                let font = &fonts[i];
+                (
+                    font.style() != fontique::FontStyle::Normal,
+                    (font.weight().value() - fontique::FontWeight::NORMAL.value()).abs() as u32,
+                )
+            };
+            rank(a).cmp(&rank(b))
+        });
+        let mut first = None;
+        for index in std::iter::once(best).chain(order) {
+            let Some(font) = fonts.get(index) else {
+                continue;
+            };
+            let Some(blob) = font.load(Some(cache)) else {
+                continue;
+            };
+            // A symbol font keeps its characters at U+F020 and up, and only answers to the plain
+            // codes, so look for the letters in the table itself.
+            let has_letters =
+                skrifa::FontRef::from_index(blob.as_ref(), font.index()).is_ok_and(|f| {
+                    skrifa::MetadataProvider::charmap(&f)
+                        .mappings()
+                        .any(|(code, _)| code == u32::from('A') || code == u32::from('a'))
+                });
+            if has_letters {
+                return Some((blob, font.index()));
+            }
+            first.get_or_insert((blob, font.index()));
+        }
+        first
     }
 }
 
@@ -527,6 +565,31 @@ mod tests {
         }
         if !families.is_empty() {
             catalog.load(&FontRef::Default, 30.0, &wanted).unwrap();
+        }
+    }
+
+    /// A family that ships an ornaments face beside its text faces, as Hoefler Text does on
+    /// macOS, must load as its text face. Skipped where the family is not installed.
+    #[cfg(feature = "system-fonts")]
+    #[test]
+    fn a_family_with_an_ornaments_face_loads_its_text_face() {
+        let catalog = FontCatalog::with_system_fonts();
+        if !catalog
+            .system_families()
+            .iter()
+            .any(|f| f == "Hoefler Text")
+        {
+            return;
+        }
+        let font = catalog
+            .load(
+                &FontRef::System("Hoefler Text".into()),
+                30.0,
+                &Font::codes_for_text("AVWa"),
+            )
+            .unwrap();
+        for ch in ['A', 'V', 'W', 'a'] {
+            assert!(font.glyph(ch).is_some(), "{ch} is missing");
         }
     }
 }

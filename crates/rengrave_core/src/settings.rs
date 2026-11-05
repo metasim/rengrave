@@ -300,6 +300,11 @@ pub struct Settings {
     pub char_space: f64,
     /// Word spacing as a percentage of the widest character.
     pub word_space: f64,
+    /// Whether text in a TrueType or OpenType font uses the font's kerning. When off,
+    /// `char_space` and `word_space` set the spacing instead.
+    pub kerning: bool,
+    /// Whether text in a TrueType or OpenType font uses the font's ligatures, such as `fi`.
+    pub ligatures: bool,
     /// How the scale is determined.
     pub height_calc: HeightCalc,
 
@@ -440,6 +445,8 @@ impl Default for Settings {
             line_space: 1.1,
             char_space: 25.0,
             word_space: 100.0,
+            kerning: true,
+            ligatures: true,
             height_calc: HeightCalc::MaxUsed,
             angle: 0.0,
             text_radius: 0.0,
@@ -987,6 +994,8 @@ impl Settings {
         set("LSPACE", self.line_space.to_string());
         set("CSPACE", self.char_space.to_string());
         set("WSPACE", self.word_space.to_string());
+        set("kerning", flag(self.kerning).to_string());
+        set("ligatures", flag(self.ligatures).to_string());
         set("TANGLE", self.angle.to_string());
         set("TRADIUS", self.text_radius.to_string());
         set("ZSAFE", self.z_safe.to_string());
@@ -1152,6 +1161,8 @@ impl Settings {
             "LSPACE" => self.line_space = num(value)?,
             "CSPACE" => self.char_space = num(value)?,
             "WSPACE" => self.word_space = num(value)?,
+            "kerning" => self.kerning = flag(value)?,
+            "ligatures" => self.ligatures = flag(value)?,
             "TANGLE" => self.angle = num(value)?,
             "TRADIUS" => self.text_radius = num(value)?,
             "ZSAFE" => self.z_safe = num(value)?,
@@ -1623,6 +1634,8 @@ mod tests {
             input_type: InputType::FontPage,
             font_block: "Greek and Coptic".into(),
             font_page: 1,
+            kerning: false,
+            ligatures: false,
             cut_type: CutType::VCarve,
             bit_shape: BitShape::Ball,
             arc_fit: ArcFit::Radius,

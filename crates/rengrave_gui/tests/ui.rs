@@ -616,6 +616,36 @@ fn the_font_filter_has_focus_stays_open_when_clicked_and_narrows_the_list() {
 }
 
 #[test]
+fn the_ligatures_toggle_is_in_size_and_spacing() {
+    let (mut harness, _) = harness();
+    settle(&mut harness);
+    assert!(harness.state().settings.ligatures);
+    click(&mut harness, "Ligatures");
+    settle(&mut harness);
+    assert!(!harness.state().settings.ligatures);
+}
+
+#[test]
+fn kerning_off_enables_the_character_and_word_spacing() {
+    let (mut harness, _) = harness();
+    settle(&mut harness);
+    click(&mut harness, "Advanced spacing");
+    harness.run_steps(2);
+    assert!(harness.state().settings.kerning);
+    let disabled = |harness: &Harness<'_, RengraveApp>| {
+        harness
+            .get_by_label("Character spacing")
+            .accesskit_node()
+            .is_disabled()
+    };
+    assert!(disabled(&harness), "the font's own spacing is in use");
+    click(&mut harness, "Kerning");
+    settle(&mut harness);
+    assert!(!harness.state().settings.kerning);
+    assert!(!disabled(&harness));
+}
+
+#[test]
 fn manage_fonts_opens_the_settings_dialog_on_the_fonts_page() {
     let (mut harness, _) = harness();
     click(&mut harness, "Font");

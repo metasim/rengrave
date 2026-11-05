@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 use crate::font::{Font, Glyph, IMAGE_GLYPH};
 use crate::geom::{Bounds, Point, Segment, ZERO};
 use crate::settings::{CutType, HeightCalc, InputType, Justify, Origin, Settings};
-use crate::shaping::Shaper;
+use crate::shaping::{ShapeFeatures, Shaper};
 
 /// The positioned outline of a job, ready for toolpath generation.
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +42,8 @@ struct Spacing {
     tracking: f64,
     /// The width of a space of a shaped font, as a fraction of the font's own space.
     word_ratio: f64,
+    /// The shaping features a shaped font uses.
+    features: ShapeFeatures,
 }
 
 impl Spacing {
@@ -108,7 +110,7 @@ impl Placement {
             missing_chars: Vec::new(),
         };
         let space_advance = shaper
-            .shape(" ")
+            .shape(" ", sp.features)
             .first()
             .map_or(0.0, |g| g.x_advance * sp.word_ratio);
         let mut chars_before = 0_usize;
@@ -122,7 +124,7 @@ impl Placement {
                     chars_before += 1;
                 }
                 let mut previous_cluster = None;
-                for glyph in shaper.shape(run) {
+                for glyph in shaper.shape(run, sp.features) {
                     let ch = run[glyph.cluster..].chars().next().unwrap_or(' ');
                     let number = chars_before + run[..glyph.cluster].chars().count() + 1;
                     let strokes = shaper.glyph(glyph.id);
@@ -290,8 +292,22 @@ impl Design {
             line: line_space,
             x_scale,
             y_scale,
-            tracking: char_width * (settings.char_space - Spacing::NATURAL_CHAR_PERCENT) / 100.0,
-            word_ratio: settings.word_space / 100.0,
+            // The spacing settings tune shaped text only when kerning is off; with it on, the
+            // font's own spacing is used.
+            tracking: if settings.kerning {
+                0.0
+            } else {
+                char_width * (settings.char_space - Spacing::NATURAL_CHAR_PERCENT) / 100.0
+            },
+            word_ratio: if settings.kerning {
+                1.0
+            } else {
+                settings.word_space / 100.0
+            },
+            features: ShapeFeatures {
+                kerning: settings.kerning,
+                ligatures: settings.ligatures,
+            },
         };
         let shaper = font
             .shaper
@@ -859,7 +875,7 @@ mod tests {
     fn shaped_text_at_natural_spacing_matches_the_shaper() {
         let font = ubuntu();
         let shaper = font.shaper.as_ref().unwrap();
-        let glyphs = shaper.shape("AV");
+        let glyphs = shaper.shape("AV", ShapeFeatures::default());
         let v = shaper.glyph(glyphs[1].id);
         let s = Settings {
             text: "AV".into(),
@@ -881,12 +897,52 @@ mod tests {
             let s = Settings {
                 text: "iii".into(),
                 char_space: percent,
+                kerning: false,
                 ..base()
             };
             Design::layout(&font, &s).unwrap().bounds.width()
         };
         assert!(at(50.0) > at(25.0));
         assert!(at(0.0) < at(25.0));
+    }
+
+    #[test]
+    fn spacing_settings_apply_to_shaped_text_only_when_kerning_is_off() {
+        let font = ubuntu();
+        let width = |kerning: bool, char_space: f64, word_space: f64| {
+            let s = Settings {
+                text: "i i".into(),
+                kerning,
+                char_space,
+                word_space,
+                ..base()
+            };
+            Design::layout(&font, &s).unwrap().bounds.width()
+        };
+        assert_abs_diff_eq!(width(true, 25.0, 100.0), width(true, 80.0, 300.0));
+        assert!(width(false, 80.0, 100.0) > width(false, 25.0, 100.0));
+        assert!(width(false, 25.0, 300.0) > width(false, 25.0, 100.0));
+        // Without kerning, the defaults leave the font's own advances.
+        assert!(width(false, 25.0, 100.0) >= width(true, 25.0, 100.0));
+    }
+
+    #[test]
+    fn ligatures_can_be_turned_off_in_shaped_text() {
+        let font = ubuntu();
+        // The characters the strokes belong to: one glyph with the ligature, two without.
+        let characters = |ligatures: bool| {
+            let s = Settings {
+                text: "fi".into(),
+                ligatures,
+                ..base()
+            };
+            let design = Design::layout(&font, &s).unwrap();
+            let numbers: std::collections::BTreeSet<usize> =
+                design.segments.iter().map(|s| s.char_num).collect();
+            numbers.into_iter().collect::<Vec<_>>()
+        };
+        assert_eq!(characters(true), [1]);
+        assert_eq!(characters(false), [1, 2]);
     }
 
     #[test]

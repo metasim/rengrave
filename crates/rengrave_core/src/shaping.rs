@@ -34,6 +34,39 @@ pub struct ShapedGlyph {
     pub y_offset: f64,
 }
 
+/// The optional features of shaping that can be turned off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShapeFeatures {
+    /// Adjust the space between pairs of letters, as `AV` is set closer than `AH`.
+    pub kerning: bool,
+    /// Replace letter sequences with the font's ligatures, as `fi` with one glyph.
+    pub ligatures: bool,
+}
+
+impl Default for ShapeFeatures {
+    fn default() -> Self {
+        Self {
+            kerning: true,
+            ligatures: true,
+        }
+    }
+}
+
+impl ShapeFeatures {
+    /// The features to switch off, as HarfBuzz settings.
+    fn disabled(self) -> Vec<harfrust::Feature> {
+        let tags: &[&[u8; 4]] = match (self.kerning, self.ligatures) {
+            (true, true) => &[],
+            (false, true) => &[b"kern"],
+            (true, false) => &[b"liga", b"clig"],
+            (false, false) => &[b"kern", b"liga", b"clig"],
+        };
+        tags.iter()
+            .map(|tag| harfrust::Feature::new(harfrust::Tag::new(tag), 0, ..))
+            .collect()
+    }
+}
+
 /// Reads glyph outlines by index.
 pub(crate) struct OutlineReader<'a> {
     outlines: OutlineGlyphCollection<'a>,
@@ -167,8 +200,8 @@ impl Shaper {
     /// Shapes one line of text, with the direction and script guessed from the text.
     ///
     /// Glyphs come in the order they are drawn from left to right. The line must not contain
-    /// line breaks.
-    pub fn shape(&self, text: &str) -> Vec<ShapedGlyph> {
+    /// line breaks. `features` turns off kerning or ligatures.
+    pub fn shape(&self, text: &str, features: ShapeFeatures) -> Vec<ShapedGlyph> {
         let Ok(font) = Self::font_ref(&self.inner.data, self.inner.face) else {
             return Vec::new();
         };
@@ -176,7 +209,8 @@ impl Shaper {
         let mut buffer = harfrust::UnicodeBuffer::new();
         buffer.push_str(text);
         buffer.guess_segment_properties();
-        let shaped = shaper.shape(buffer, harfrust::ShapeOptions::new());
+        let disabled = features.disabled();
+        let shaped = shaper.shape(buffer, harfrust::ShapeOptions::new().features(&disabled));
         let k = self.inner.factor;
         shaped
             .glyph_infos()
@@ -224,6 +258,7 @@ impl Shaper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::assert_abs_diff_eq;
 
     fn ubuntu() -> Font {
         Font::from_outline_font(
@@ -236,7 +271,11 @@ mod tests {
     }
 
     fn advance_of(shaper: &Shaper, text: &str) -> f64 {
-        shaper.shape(text).iter().map(|g| g.x_advance).sum()
+        shaper
+            .shape(text, ShapeFeatures::default())
+            .iter()
+            .map(|g| g.x_advance)
+            .sum()
     }
 
     #[test]
@@ -251,7 +290,11 @@ mod tests {
     #[test]
     fn one_glyph_per_letter_and_clusters_are_byte_offsets() {
         let font = ubuntu();
-        let shaped = font.shaper.as_ref().unwrap().shape("aé b");
+        let shaped = font
+            .shaper
+            .as_ref()
+            .unwrap()
+            .shape("aé b", ShapeFeatures::default());
         let clusters: Vec<usize> = shaped.iter().map(|g| g.cluster).collect();
         assert_eq!(clusters, [0, 1, 3, 4]);
         assert!(shaped.iter().all(|g| g.id != 0));
@@ -260,7 +303,11 @@ mod tests {
     #[test]
     fn a_character_the_font_lacks_shapes_to_the_not_found_glyph() {
         let font = ubuntu();
-        let shaped = font.shaper.as_ref().unwrap().shape("\u{4e00}");
+        let shaped = font
+            .shaper
+            .as_ref()
+            .unwrap()
+            .shape("\u{4e00}", ShapeFeatures::default());
         assert_eq!(shaped[0].id, 0);
     }
 
@@ -268,11 +315,43 @@ mod tests {
     fn glyph_outlines_are_read_by_index_and_cached() {
         let font = ubuntu();
         let shaper = font.shaper.as_ref().unwrap();
-        let id = shaper.shape("H")[0].id;
+        let id = shaper.shape("H", ShapeFeatures::default())[0].id;
         let glyph = shaper.glyph(id);
         assert!(!glyph.strokes.is_empty());
         assert!(Arc::ptr_eq(&glyph, &shaper.glyph(id)));
         assert_eq!(*glyph, font.glyph('H').unwrap().clone());
-        assert!(shaper.glyph(shaper.shape(" ")[0].id).strokes.is_empty());
+        assert!(
+            shaper
+                .glyph(shaper.shape(" ", ShapeFeatures::default())[0].id)
+                .strokes
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn kerning_can_be_turned_off() {
+        let font = ubuntu();
+        let shaper = font.shaper.as_ref().unwrap();
+        let off = ShapeFeatures {
+            kerning: false,
+            ..ShapeFeatures::default()
+        };
+        let kerned = advance_of(shaper, "AV");
+        let unkerned: f64 = shaper.shape("AV", off).iter().map(|g| g.x_advance).sum();
+        let apart = advance_of(shaper, "A") + advance_of(shaper, "V");
+        assert!(unkerned > kerned + 0.05, "{unkerned} vs {kerned}");
+        assert_abs_diff_eq!(unkerned, apart, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn ligatures_can_be_turned_off() {
+        let font = ubuntu();
+        let shaper = font.shaper.as_ref().unwrap();
+        let off = ShapeFeatures {
+            ligatures: false,
+            ..ShapeFeatures::default()
+        };
+        assert_eq!(shaper.shape("fi", off).len(), 2);
+        assert_eq!(shaper.shape("fi", ShapeFeatures::default()).len(), 1);
     }
 }

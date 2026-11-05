@@ -77,6 +77,8 @@ pub struct FontCoverage {
     pub blocks: Vec<(&'static UnicodeBlock, usize)>,
     /// Every code point the font maps to a glyph, in ascending order.
     codes: Vec<u32>,
+    /// Whether the font's text is shaped, so kerning and ligatures apply.
+    pub shaped: bool,
 }
 
 impl FontCoverage {
@@ -127,6 +129,7 @@ impl Font {
             latin: self.count_in(0..=0xFF),
             blocks,
             codes: self.available.clone(),
+            shaped: self.shaper.is_some(),
         }
     }
 
