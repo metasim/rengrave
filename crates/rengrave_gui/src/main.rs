@@ -9,6 +9,10 @@ use std::path::PathBuf;
 /// Key under which settings persist between sessions.
 const STORAGE_KEY: &str = "settings";
 
+/// The application icon, set when the window opens. A bundled app also has the icon in its
+/// `.icns` file, but an application started from the command line has only this one.
+const ICON_PNG: &[u8] = include_bytes!("../assets/icon/Rengrave.png");
+
 /// Forwards the application to `eframe`, persisting settings between runs.
 struct Window(RengraveApp);
 
@@ -29,6 +33,10 @@ fn main() -> eframe::Result {
             .with_title("Rengrave")
             .with_inner_size([1180.0, 760.0])
             .with_min_inner_size([760.0, 480.0])
+            .with_icon(
+                eframe::icon_data::from_png_bytes(ICON_PNG)
+                    .expect("the embedded application icon is a valid PNG"),
+            )
             .with_drag_and_drop(true),
         ..Default::default()
     };
@@ -46,4 +54,15 @@ fn main() -> eframe::Result {
             Ok(Box::new(Window(app)))
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_embedded_icon_decodes() {
+        let icon = eframe::icon_data::from_png_bytes(ICON_PNG).unwrap();
+        assert_eq!((icon.width, icon.height), (512, 512));
+    }
 }

@@ -33,6 +33,11 @@ SPDX-FileCopyrightText = "2026 Simeon H.K. Fitch"
 SPDX-License-Identifier = "GPL-3.0-or-later"
 
 [[annotations]]
+path = ["crates/rengrave_gui/assets/icon/Rengrave.icns", "crates/rengrave_gui/assets/icon/Rengrave.png"]
+SPDX-FileCopyrightText = "2026 Simeon H.K. Fitch"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
 path = "crates/rengrave_core/data/Blocks.txt"
 SPDX-FileCopyrightText = "1991-2026 Unicode, Inc."
 SPDX-License-Identifier = "Unicode-3.0"
