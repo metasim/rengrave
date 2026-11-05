@@ -59,7 +59,7 @@ pub use catalog::{FontCatalog, FontRef, UserFont};
 pub use cleanup::CleanupPaths;
 pub use design::Design;
 pub use error::{Error, Result};
-pub use font::Font;
+pub use font::{Font, FontCoverage};
 pub use gcode::GcodeProgram;
 pub use job::Job;
 pub use progress::Progress;

@@ -285,6 +285,24 @@ fn an_unknown_font_prefix_is_rejected() {
 }
 
 #[test]
+fn font_page_engraves_a_block_of_the_font() {
+    let latin = stdout_of(&["gcode", "--font-page", "latin"]);
+    let basic = stdout_of(&["gcode", "--font-page", "basic latin", "--page", "1"]);
+    assert!(latin.contains("G1"));
+    assert!(latin.len() > basic.len(), "Latin-1 adds characters");
+    assert!(basic.contains("G1"));
+}
+
+#[test]
+fn font_page_rejects_an_unknown_block_and_a_page_without_one() {
+    let out = rengrave_with_font(&["gcode", "--font-page", "Klingon"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown Unicode block"));
+    let out = rengrave_with_font(&["gcode", "--page", "2"]);
+    assert!(!out.status.success());
+}
+
+#[test]
 fn verbose_reports_progress_on_stderr_only() {
     let out = rengrave_with_font(&[
         "gcode", "-t", "A", "--mode", "v-carve", "--step", "0.05", "-v",

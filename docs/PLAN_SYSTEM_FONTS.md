@@ -205,6 +205,12 @@ If you later want a guaranteed fallback, the lowest-friction single font is Hack
 already in the GUI binary and its license is MIT-style; it is monospace, which is a poor general
 default, so I would not make it the default selection.
 
+## Status
+
+Font Page mode is implemented: `InputType::FontPage`, the Unicode block chooser (only blocks the
+font covers, with counts), 500-code-point pages, and `--font-page`/`--page` on the CLI. The block
+and page are saved with the job as `font_block` and `font_page`. `show_font_index` is gone.
+
 ## Options
 
 ### Option A: Basic

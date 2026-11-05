@@ -61,12 +61,12 @@ impl Design {
         settings.ensure_valid()?;
         if font.is_empty() {
             return Err(Error::NothingToCut(match settings.input_type {
-                InputType::Text => "No font characters loaded".into(),
+                InputType::Text | InputType::FontPage => "No font characters loaded".into(),
                 InputType::Image => "No image loaded".into(),
             }));
         }
-        let is_text = settings.input_type == InputType::Text;
-        let radius_in = if is_text && !settings.show_font_index {
+        let is_text = settings.input_type.uses_font();
+        let radius_in = if settings.input_type == InputType::Text {
             settings.text_radius
         } else {
             0.0
@@ -304,26 +304,21 @@ impl Design {
         if settings.input_type == InputType::Image {
             return IMAGE_GLYPH.to_string();
         }
-        if !settings.show_font_index {
+        if settings.input_type == InputType::Text {
             return settings.text.clone();
         }
-        let columns = 15;
-        let mut out = String::new();
-        let mut count = 0;
-        for ch in font
+        const COLUMNS: usize = 16;
+        let page = settings.font_page_codes();
+        let chars: Vec<char> = font
             .glyphs
-            .keys()
-            .filter(|&&k| k < 256)
-            .filter_map(|&k| char::from_u32(k))
-        {
-            count += 1;
-            out.push(ch);
-            if count > columns {
-                out.push('\n');
-                count = 0;
-            }
-        }
-        out
+            .range(page)
+            .filter_map(|(&k, _)| char::from_u32(k))
+            .collect();
+        chars
+            .chunks(COLUMNS)
+            .map(|row| row.iter().collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// Finds the height and depth that determine the scale, or `None` if nothing matches.
@@ -656,15 +651,28 @@ mod tests {
     }
 
     #[test]
-    fn font_index_lays_out_all_characters_in_rows() {
+    fn font_page_lays_out_the_characters_of_the_page_in_rows() {
         let font = box_font("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
         let s = Settings {
-            show_font_index: true,
+            input_type: InputType::FontPage,
             ..base()
         };
         let d = Design::layout(&font, &s).unwrap();
         assert_eq!(d.segments.len(), 26 * 4);
         assert!(d.segments.iter().any(|s| s.line == 1));
+        assert!(d.segments.iter().all(|s| s.line < 2));
+    }
+
+    #[test]
+    fn font_page_ignores_the_text_and_glyphs_outside_the_page() {
+        let font = box_font("AB\u{e9}\u{4e00}");
+        let s = Settings {
+            input_type: InputType::FontPage,
+            text: "Z".into(),
+            ..base()
+        };
+        let d = Design::layout(&font, &s).unwrap();
+        assert_eq!(d.segments.len(), 3 * 4);
     }
 
     #[test]

@@ -226,7 +226,7 @@ fn starts_and_calculates_default_job() {
 
 #[test]
 fn every_tab_renders_in_every_mode() {
-    for input in [InputType::Text, InputType::Image] {
+    for input in [InputType::Text, InputType::FontPage, InputType::Image] {
         for cut in [CutType::VCarve, CutType::Engrave] {
             for bit in [BitShape::VBit, BitShape::Ball, BitShape::Flat] {
                 for units in [Units::Inches, Units::Millimeters] {
@@ -532,6 +532,31 @@ fn font_can_be_chosen_from_the_list() {
     click(&mut harness, "Hack");
     settle(&mut harness);
     assert_eq!(harness.state().settings.font, FontRef::User("Hack".into()));
+}
+
+#[test]
+fn font_page_shows_a_block_the_font_covers() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "Font Page");
+    settle(&mut harness);
+    assert_eq!(harness.state().settings.input_type, InputType::FontPage);
+    assert!(harness.state().design().is_some());
+    let greek = harness
+        .state()
+        .font_coverage()
+        .blocks
+        .iter()
+        .find(|(b, _)| b.name == "Greek and Coptic")
+        .map(|(_, n)| *n)
+        .expect("Hack has Greek letters");
+    click(&mut harness, "Characters");
+    click(&mut harness, &format!("Greek and Coptic ({greek})"));
+    settle(&mut harness);
+    let app = harness.state();
+    assert_eq!(app.settings.font_block, "Greek and Coptic");
+    assert_eq!(app.settings.font_page, 0);
+    assert_eq!(app.status().level, StatusLevel::Info);
+    assert!(app.design().is_some());
 }
 
 #[test]

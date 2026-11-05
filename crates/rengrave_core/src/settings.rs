@@ -13,6 +13,8 @@
 
 use crate::catalog::FontRef;
 use crate::geom::round_significant;
+use crate::unicode_blocks::UnicodeBlock;
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -79,10 +81,19 @@ named_enum!(
     InputType {
         /// Text in the selected font.
         Text => "text",
+        /// A page of the characters in the selected font.
+        FontPage => "font-page",
         /// A DXF drawing or a traced raster image.
         Image => "image",
     }
 );
+impl InputType {
+    /// Returns `true` if the design is made of font characters rather than a drawing.
+    pub const fn uses_font(self) -> bool {
+        matches!(self, Self::Text | Self::FontPage)
+    }
+}
+
 named_enum!(
     /// Tool profile used for V-carving.
     BitShape {
@@ -268,8 +279,11 @@ pub struct Settings {
     pub font: FontRef,
     /// Image or DXF file for image input.
     pub image_file: PathBuf,
-    /// Lay out every character of the font instead of `text`.
-    pub show_font_index: bool,
+    /// The Unicode block shown by [`InputType::FontPage`]; empty for Basic Latin and Latin-1
+    /// Supplement together.
+    pub font_block: String,
+    /// The page of `font_block` shown, counted from zero; see [`UnicodeBlock::page_count`].
+    pub font_page: u32,
 
     // ---- Size and spacing
     /// Height of a line of text, or of the image; a percentage when `use_image_size` is set.
@@ -417,7 +431,8 @@ impl Default for Settings {
             text: "F-Engrave".into(),
             font: FontRef::Default,
             image_file: PathBuf::new(),
-            show_font_index: false,
+            font_block: String::new(),
+            font_page: 0,
             y_scale: 2.0,
             x_scale: 100.0,
             use_image_size: false,
@@ -494,6 +509,13 @@ pub struct Issue {
 }
 
 impl Settings {
+    /// The code points of the page [`InputType::FontPage`] shows, clamped to the block's pages.
+    pub fn font_page_codes(&self) -> RangeInclusive<u32> {
+        UnicodeBlock::named(&self.font_block).map_or(0..=0xFF, |block| {
+            block.page_codes(self.font_page.min(block.page_count() - 1))
+        })
+    }
+
     /// Default settings in the requested units, with lengths at sensible metric values.
     pub fn with_units(units: Units) -> Self {
         let mut settings = Self::default();
@@ -516,7 +538,7 @@ impl Settings {
                 issues.push(Issue { field, message });
             }
         };
-        let is_text = self.input_type == InputType::Text;
+        let is_text = self.input_type.uses_font();
         let is_carve = self.cut_type == CutType::VCarve;
 
         check(
@@ -789,7 +811,7 @@ impl Settings {
     /// The direction the carve runs, after the transformations that reverse it.
     pub(crate) fn effective_flop(&self, for_cleanup: bool) -> bool {
         let mut flop = self.v_flop;
-        if self.input_type == InputType::Text && !for_cleanup {
+        if self.input_type.uses_font() && !for_cleanup {
             flop ^= self.add_box;
             flop ^= self.mirror;
             flop ^= self.flip;
@@ -980,6 +1002,8 @@ impl Settings {
         set("FEED", self.feed.to_string());
         set("PLUNGE", self.plunge.to_string());
         set("font", format!("\"{}\"", self.font));
+        set("font_block", format!("\"{}\"", self.font_block));
+        set("font_page", self.font_page.to_string());
         set("H_CALC", self.height_calc.to_string());
         set("boxgap", self.box_gap.to_string());
         set("cut_type", self.cut_type.to_string());
@@ -1143,6 +1167,8 @@ impl Settings {
             "FEED" => self.feed = num(value)?,
             "PLUNGE" => self.plunge = num(value)?,
             "font" => self.font = quoted(value).parse()?,
+            "font_block" => self.font_block = quoted(value).to_string(),
+            "font_page" => self.font_page = num(value)? as u32,
             "H_CALC" => self.height_calc = value.parse()?,
             "boxgap" => self.box_gap = num(value)?,
             "cut_type" => self.cut_type = value.parse()?,
@@ -1594,7 +1620,9 @@ mod tests {
             text: "Héllo\nWörld, a long string of text".into(),
             font: FontRef::System("Some Font".into()),
             image_file: PathBuf::from("/x/y z.dxf"),
-            input_type: InputType::Image,
+            input_type: InputType::FontPage,
+            font_block: "Greek and Coptic".into(),
+            font_page: 1,
             cut_type: CutType::VCarve,
             bit_shape: BitShape::Ball,
             arc_fit: ArcFit::Radius,
@@ -1628,6 +1656,17 @@ mod tests {
         let problems = restored.apply_settings_text(&text);
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(restored, original);
+    }
+
+    #[test]
+    fn font_page_defaults_to_latin_and_clamps_the_page() {
+        let mut s = Settings::default();
+        assert_eq!(s.font_page_codes(), 0..=0xFF);
+        s.font_block = "Basic Latin".into();
+        s.font_page = 9;
+        assert_eq!(s.font_page_codes(), 0..=0x7F);
+        s.font_block = "No Such Block".into();
+        assert_eq!(s.font_page_codes(), 0..=0xFF);
     }
 
     #[test]

@@ -16,6 +16,8 @@ reference programs. It runs with no helper programs and uses the fonts installed
 - **Engraving** of outlines at constant depth
 - **Text** in any installed font, or in CXF stroke fonts and TrueType/OpenType files you add to
   your font library, with justification, spacing, rotation, mirroring, and placement on a circle
+- **Font pages**: lay out the characters of a font, one Unicode block at a time (large blocks in
+  pages of 500), to see what a font contains or to engrave a specimen
 - **Images**: DXF drawings, plus PNG, BMP, PBM/PGM/PPM, JPEG, GIF, and TIFF bitmaps through a
   built-in tracer or `potrace`
 - **Cleanup operations** that clear flat regions with a straight bit and tidy edges with a V-bit
@@ -126,6 +128,13 @@ rengrave-cli gcode --font "system:Helvetica" --text "One|Two" --justify center -
 
 ```bash
 rengrave-cli gcode --font-file /path/to/font.ttf --text "One|Two" --justify center --mode v-carve --output two.ngc
+```
+
+Engrave the Greek letters of a font, or page 2 of a large block:
+
+```bash
+rengrave-cli gcode --font "system:Helvetica" --font-page "Greek and Coptic" --output greek.ngc
+rengrave-cli gcode --font "system:Songti SC" --font-page "CJK Unified Ideographs" --page 2
 ```
 
 Write the job's settings, then reuse them:

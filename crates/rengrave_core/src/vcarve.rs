@@ -319,7 +319,7 @@ impl CarvePath {
         };
         let not_ball = settings.bit_shape != BitShape::Ball;
         let drives_to_corner = settings.v_bit_angle != 0.0 && not_ball;
-        let scope = if settings.input_type == InputType::Text {
+        let scope = if settings.input_type.uses_font() {
             settings.v_check_scope
         } else {
             CheckScope::All
