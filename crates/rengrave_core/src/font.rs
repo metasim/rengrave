@@ -74,6 +74,22 @@ pub struct FontCoverage {
     pub latin: usize,
     /// Every block with at least one character, in code point order, with the character count.
     pub blocks: Vec<(&'static UnicodeBlock, usize)>,
+    /// Every code point the font maps to a glyph, in ascending order.
+    codes: Vec<u32>,
+}
+
+impl FontCoverage {
+    /// The characters of the font with code points in `range`, as text. Control characters, which
+    /// cannot be shown or pasted usefully, are left out.
+    pub fn chars_in(&self, range: RangeInclusive<u32>) -> String {
+        let start = self.codes.partition_point(|&c| c < *range.start());
+        let end = self.codes.partition_point(|&c| c <= *range.end());
+        self.codes[start..end]
+            .iter()
+            .filter_map(|&c| char::from_u32(c))
+            .filter(|c| !c.is_control())
+            .collect()
+    }
 }
 
 /// A character set mapping Unicode code points to glyphs.
@@ -107,6 +123,7 @@ impl Font {
         FontCoverage {
             latin: self.count_in(0..=0xFF),
             blocks,
+            codes: self.available.clone(),
         }
     }
 
@@ -204,6 +221,9 @@ impl Font {
             .map(|(code, _)| code)
             .filter(|&code| code != 0)
             .collect();
+        // A symbol font, such as Wingdings, keeps its characters at U+F020 and up in its table,
+        // but is used with the codes 0x20 to 0xFF, and the charmap answers to those as well.
+        available.extend((1..=0xFF).filter(|&code| charmap.map(code).is_some()));
         available.sort_unstable();
         available.dedup();
         let mut font = Self {
@@ -484,6 +504,38 @@ mod tests {
     use approx::assert_abs_diff_eq;
 
     const CXF: &str = "# comment\n\n[A] 3\nL 0,0,1,9\nL 1,9,2,0\n\n[#0042]\nL 0,0,0,9\n\n[0043] C\nL 0,1,0,2 \nbad line\nL 1,x,2,3\n\n[toolong]\nL 9,9,9,9\n\n[D]\nL 5,5,6,6\n";
+
+    #[test]
+    fn coverage_lists_the_characters_of_a_range() {
+        let font = Font::from_outline_font(
+            epaint_default_fonts::HACK_REGULAR,
+            0,
+            5.0,
+            &Font::codes_in(1..=0xFF),
+        )
+        .unwrap();
+        let coverage = font.coverage();
+        let basic = coverage.chars_in(0..=0x7F);
+        assert!(basic.starts_with(' '), "{basic:?}");
+        assert!(basic.contains('A') && !basic.contains('\u{e9}'));
+        assert!(!basic.contains('\u{7f}'), "no control characters");
+        assert!(coverage.chars_in(0xE9..=0xE9) == "\u{e9}");
+        assert!(coverage.chars_in(0x4E00..=0x4E10).is_empty());
+    }
+
+    /// Wingdings 3 is a symbol font; this checks it when the machine has it, which most do not.
+    #[test]
+    fn symbol_fonts_list_the_codes_they_are_typed_with() {
+        let fonts = crate::FontCatalog::with_system_fonts();
+        let family = crate::FontRef::System("Wingdings 3".into());
+        if !fonts.contains(&family) {
+            return;
+        }
+        let font = fonts.load(&family, 5.0, &Font::codes_in(1..=0xFF)).unwrap();
+        let coverage = font.coverage();
+        assert!(coverage.latin > 100, "{}", coverage.latin);
+        assert!(!coverage.chars_in(0..=0xFF).is_empty());
+    }
 
     #[test]
     fn cxf_header_forms() {

@@ -682,6 +682,26 @@ impl RengraveApp {
         }
     }
 
+    /// The characters of the font page shown, as text.
+    pub fn font_page_characters(&self) -> String {
+        self.font_coverage.chars_in(self.settings.font_page_codes())
+    }
+
+    /// Copies the characters of the font page shown to the clipboard.
+    pub(crate) fn copy_font_page_characters(&mut self) {
+        let text = self.font_page_characters();
+        if text.is_empty() {
+            self.notify(
+                StatusLevel::Warning,
+                "The font has no characters on this page",
+            );
+            return;
+        }
+        let count = text.chars().count();
+        self.ctx.copy_text(text);
+        self.notify(StatusLevel::Info, format!("Copied {count} characters"));
+    }
+
     /// Copies the G-code program to the clipboard.
     pub fn copy_gcode(&mut self) {
         if !self.can_write_gcode() {
