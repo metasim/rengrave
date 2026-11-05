@@ -560,6 +560,27 @@ fn font_page_shows_a_block_the_font_covers() {
 }
 
 #[test]
+fn font_page_characters_are_copied_to_the_clipboard() {
+    let (mut harness, _) = harness();
+    click(&mut harness, "Font Page");
+    settle(&mut harness);
+    let text = harness.state().font_page_characters();
+    assert!(
+        text.contains('A') && text.contains('\u{e9}'),
+        "Basic Latin and Latin-1: {text:?}"
+    );
+    assert!(!text.chars().any(char::is_control));
+    harness.get_by_label("Copy characters").click();
+    harness.run_steps(2);
+    let status = harness.state().status();
+    assert_eq!(status.level, StatusLevel::Info);
+    assert_eq!(
+        status.text,
+        format!("Copied {} characters", text.chars().count())
+    );
+}
+
+#[test]
 fn manage_fonts_opens_the_settings_dialog_on_the_fonts_page() {
     let (mut harness, _) = harness();
     click(&mut harness, "Font");

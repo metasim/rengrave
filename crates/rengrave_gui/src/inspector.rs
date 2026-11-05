@@ -175,6 +175,13 @@ impl RengraveApp {
                 "The Unicode block to lay out; only blocks the font covers are listed",
             );
         });
+        if ui
+            .icon_button(true, icons::COPY, "Copy characters")
+            .on_hover_text("Copy the characters of this page to the clipboard as text")
+            .clicked()
+        {
+            self.copy_font_page_characters();
+        }
         let pages = UnicodeBlock::named(&self.settings.font_block).map_or(1, |b| b.page_count());
         if pages > 1 {
             let page = self.settings.font_page.min(pages - 1);

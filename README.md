@@ -17,7 +17,7 @@ reference programs. It runs with no helper programs and uses the fonts installed
 - **Text** in any installed font, or in CXF stroke fonts and TrueType/OpenType files you add to
   your font library, with justification, spacing, rotation, mirroring, and placement on a circle
 - **Font pages**: lay out the characters of a font, one Unicode block at a time (large blocks in
-  pages of 500), to see what a font contains or to engrave a specimen
+  pages of 500), to see what a font contains, to engrave a specimen, or to copy its characters as text
 - **Images**: DXF drawings, plus PNG, BMP, PBM/PGM/PPM, JPEG, GIF, and TIFF bitmaps through a
   built-in tracer or `potrace`
 - **Cleanup operations** that clear flat regions with a straight bit and tidy edges with a V-bit
