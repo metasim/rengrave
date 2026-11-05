@@ -124,10 +124,14 @@ impl RengraveApp {
         ui.horizontal(|ui| {
             let selected = self.font_label();
             let label = ui.label(ui.control_label("Font"));
+            // A click in the filter must not close the menu; choosing a font does.
+            let just_opened = !self.font_menu_open;
             let response = egui::ComboBox::from_id_salt("font_combo")
                 .selected_text(selected)
                 .width(170.0)
-                .show_ui(ui, |ui| self.font_menu(ui));
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show_ui(ui, |ui| self.font_menu(ui, just_opened));
+            self.font_menu_open = response.inner.is_some();
             response
                 .response
                 .labelled_by(label.id)
@@ -196,7 +200,10 @@ impl RengraveApp {
         }
     }
 
-    fn font_menu(&mut self, ui: &mut Ui) {
+    fn font_menu(&mut self, ui: &mut Ui, just_opened: bool) {
+        if just_opened {
+            self.font_filter.clear();
+        }
         let filter = ui.add(
             egui::TextEdit::singleline(&mut self.font_filter)
                 .hint_text("Filter")
@@ -204,6 +211,9 @@ impl RengraveApp {
         );
         filter
             .widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Filter fonts"));
+        if just_opened {
+            filter.request_focus();
+        }
         let needle = self.font_filter.to_lowercase();
         let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(&needle);
         egui::ScrollArea::vertical()
@@ -223,6 +233,17 @@ impl RengraveApp {
         }
     }
 
+    /// One font in the picker; choosing it closes the menu.
+    fn font_choice(&mut self, ui: &mut Ui, font: FontRef, label: &str) {
+        if ui
+            .selectable_label(self.settings.font == font, label)
+            .clicked()
+        {
+            self.settings.font = font;
+            ui.close();
+        }
+    }
+
     /// A group heading of the picker.
     fn font_group_heading(ui: &mut Ui, name: &str) {
         ui.label(egui::RichText::new(name).strong().weak());
@@ -233,11 +254,7 @@ impl RengraveApp {
         Self::font_group_heading(ui, "User fonts");
         let fonts = self.fonts.user_fonts();
         for font in fonts.iter().filter(|f| matches(&f.name)) {
-            ui.selectable_value(
-                &mut self.settings.font,
-                FontRef::User(font.name.clone()),
-                &font.name,
-            );
+            self.font_choice(ui, FontRef::User(font.name.clone()), &font.name);
         }
         if ui
             .button("Add…")
@@ -263,22 +280,14 @@ impl RengraveApp {
                 .request_repaint_after(std::time::Duration::from_millis(100));
             return;
         }
-        ui.selectable_value(
-            &mut self.settings.font,
-            FontRef::Default,
-            "Default (sans-serif)",
-        );
+        self.font_choice(ui, FontRef::Default, "Default (sans-serif)");
         for family in self
             .fonts
             .system_families()
             .into_iter()
             .filter(|f| matches(f))
         {
-            ui.selectable_value(
-                &mut self.settings.font,
-                FontRef::System(family.clone()),
-                family,
-            );
+            self.font_choice(ui, FontRef::System(family.clone()), &family);
         }
     }
 
