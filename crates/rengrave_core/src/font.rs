@@ -11,13 +11,14 @@
 //! [`Font`] whose glyphs are lists of straight strokes.
 
 use crate::error::{Error, Result};
+use crate::shaping::{FontData, OutlineReader, Shaper};
 use crate::unicode_blocks::UnicodeBlock;
-use skrifa::instance::{LocationRef, Size};
-use skrifa::outline::{DrawSettings, OutlinePen};
-use skrifa::{FontRef, GlyphId, MetadataProvider};
+use skrifa::MetadataProvider;
+use skrifa::outline::OutlinePen;
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 use std::path::Path;
+use std::sync::Arc;
 
 /// A straight stroke in font units.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -100,6 +101,8 @@ pub struct Font {
     pub glyphs: BTreeMap<u32, Glyph>,
     /// Every code point the font maps to a glyph, whether loaded or not, in ascending order.
     pub available: Vec<u32>,
+    /// Shapes text with the font's own spacing rules, if it is a TrueType or OpenType font.
+    pub shaper: Option<Shaper>,
 }
 
 impl Font {
@@ -185,70 +188,53 @@ impl Font {
     /// within `seg_arc` degrees. Contours are normalized so outer loops run clockwise. Code
     /// points the font does not contain, or that have no outline (a space), are skipped. `face`
     /// selects a font within a collection (`.ttc`) and is zero for a single font.
+    ///
+    /// The font also gets a [`Shaper`], which [`Design::layout`](crate::Design::layout) uses to
+    /// place text.
     pub fn from_outline_font(data: &[u8], face: u32, seg_arc: f64, wanted: &[u32]) -> Result<Self> {
-        let face = FontRef::from_index(data, face)
-            .map_err(|e| Error::Font(format!("unable to parse font: {e}")))?;
-        let tol = seg_arc.max(0.01).to_radians();
-        let charmap = face.charmap();
-        let outlines = face.outline_glyphs();
-        let draw = |id: GlyphId| -> Option<Vec<Stroke>> {
-            let mut sink = OutlineSink::new(tol);
-            outlines
-                .get(id)?
-                .draw(
-                    DrawSettings::unhinted(Size::unscaled(), LocationRef::default()),
-                    &mut sink,
-                )
-                .ok()?;
-            (!sink.strokes.is_empty()).then_some(sink.strokes)
-        };
+        Self::from_outline_data(Arc::new(data.to_vec()), face, seg_arc, wanted)
+    }
 
-        let probe = charmap.map('A').and_then(draw).and_then(|strokes| {
-            let y_max = strokes
-                .iter()
-                .map(|s| s.y1.max(s.y2))
-                .fold(f64::NEG_INFINITY, f64::max);
-            (y_max > 0.0).then_some(y_max)
-        });
-        let units_per_em = face
-            .metrics(Size::unscaled(), LocationRef::default())
-            .units_per_em;
-        let cap_height = probe.unwrap_or_else(|| f64::from(units_per_em) * 0.7);
-        let factor = 9.0 / cap_height;
-
-        let mut available: Vec<u32> = charmap
-            .mappings()
-            .map(|(code, _)| code)
-            .filter(|&code| code != 0)
-            .collect();
-        // A symbol font, such as Wingdings, keeps its characters at U+F020 and up in its table,
-        // but is used with the codes 0x20 to 0xFF, and the charmap answers to those as well.
-        available.extend((1..=0xFF).filter(|&code| charmap.map(code).is_some()));
-        available.sort_unstable();
-        available.dedup();
-        let mut font = Self {
-            available,
-            ..Self::default()
-        };
-        for &code in wanted {
-            let Some(mut strokes) = charmap.map(code).and_then(draw) else {
-                continue;
+    /// Like [`Self::from_outline_font`], sharing the bytes of the font file.
+    pub fn from_outline_data(
+        data: FontData,
+        face: u32,
+        seg_arc: f64,
+        wanted: &[u32],
+    ) -> Result<Self> {
+        let shaper = {
+            let font_ref = Shaper::font_ref(&data, face)?;
+            let reader = OutlineReader::new(&font_ref, seg_arc);
+            let charmap = font_ref.charmap();
+            let mut available: Vec<u32> = charmap
+                .mappings()
+                .map(|(code, _)| code)
+                .filter(|&code| code != 0)
+                .collect();
+            // A symbol font, such as Wingdings, keeps its characters at U+F020 and up in its
+            // table, but is used with the codes 0x20 to 0xFF, and the charmap answers to those
+            // as well.
+            available.extend((1..=0xFF).filter(|&code| charmap.map(code).is_some()));
+            available.sort_unstable();
+            available.dedup();
+            let mut font = Self {
+                available,
+                ..Self::default()
             };
-            Font::normalize_winding(&mut strokes);
-            for s in &mut strokes {
-                s.x1 *= factor;
-                s.y1 *= factor;
-                s.x2 *= factor;
-                s.y2 *= factor;
+            for &code in wanted {
+                if let Some(glyph) = charmap.map(code).and_then(|id| reader.read(id)) {
+                    font.glyphs.insert(code, glyph);
+                }
             }
-            font.glyphs.insert(code, Glyph { strokes });
-        }
-        if font.is_empty() {
-            return Err(Error::Font(
-                "font has no outlines for the requested characters".into(),
-            ));
-        }
-        Ok(font)
+            if font.is_empty() {
+                return Err(Error::Font(
+                    "font has no outlines for the requested characters".into(),
+                ));
+            }
+            font.shaper = Some(Shaper::new(data.clone(), face, &reader)?);
+            font
+        };
+        Ok(shaper)
     }
 
     /// The code points in `range`, without the null character.
@@ -278,7 +264,9 @@ impl Font {
         })?;
         match extension_upper(path).as_str() {
             "CXF" => Ok(Self::parse_cxf(&String::from_utf8_lossy(&bytes), seg_arc)),
-            "TTF" | "OTF" | "TTC" | "OTC" => Self::from_outline_font(&bytes, face, seg_arc, wanted),
+            "TTF" | "OTF" | "TTC" | "OTC" => {
+                Self::from_outline_data(Arc::new(bytes), face, seg_arc, wanted)
+            }
             other => Err(Error::Font(format!(
                 "unsupported font file type {other:?}: {}",
                 path.display()
@@ -308,15 +296,15 @@ pub fn extension_upper(path: &Path) -> String {
 }
 
 /// Collects a glyph outline as strokes, flattening curves adaptively.
-struct OutlineSink {
-    strokes: Vec<Stroke>,
+pub(crate) struct OutlineSink {
+    pub(crate) strokes: Vec<Stroke>,
     tol: f64,
     start: (f64, f64),
     cur: (f64, f64),
 }
 
 impl OutlineSink {
-    fn new(tol: f64) -> Self {
+    pub(crate) fn new(tol: f64) -> Self {
         Self {
             strokes: Vec::new(),
             tol,
@@ -486,7 +474,7 @@ impl Font {
     }
 
     /// Reverses a glyph whose outer contours run counter-clockwise (the CFF convention).
-    fn normalize_winding(strokes: &mut [Stroke]) {
+    pub(crate) fn normalize_winding(strokes: &mut [Stroke]) {
         let doubled_area: f64 = strokes.iter().map(|s| s.x1 * s.y2 - s.x2 * s.y1).sum();
         if doubled_area > 0.0 {
             strokes.reverse();

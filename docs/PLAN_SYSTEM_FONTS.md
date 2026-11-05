@@ -3,8 +3,8 @@
 Status: draft 2 for review, revised after owner feedback. Nothing has been implemented or
 prototyped; the claims below come from reading the code and the crate sources in the Cargo registry.
 
-Out of scope: text layout (kerning, shaping, spacing). Moving to a different layout engine is a
-separate, later effort and is not considered here.
+Out of scope: text layout (kerning, shaping, spacing). That was done afterwards; see D19 in
+`docs/DECISIONS.md`.
 
 ## Goal
 

@@ -7,9 +7,10 @@
 //! Lays out text or a drawing as positioned outline segments.
 
 use crate::error::{Error, Result};
-use crate::font::{Font, IMAGE_GLYPH};
+use crate::font::{Font, Glyph, IMAGE_GLYPH};
 use crate::geom::{Bounds, Point, Segment, ZERO};
 use crate::settings::{CutType, HeightCalc, InputType, Justify, Origin, Settings};
+use crate::shaping::Shaper;
 
 /// The positioned outline of a job, ready for toolpath generation.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +25,169 @@ pub struct Design {
     pub circle_center: Point,
     /// Characters in the text that the font does not contain.
     pub missing_chars: Vec<char>,
+}
+
+/// The distances that place glyphs, in glyph units unless noted.
+struct Spacing {
+    /// The width of a space between words, for fonts that are placed a character at a time.
+    word: f64,
+    /// The gap after each character, for fonts that are placed a character at a time.
+    char: f64,
+    /// The distance between baselines.
+    line: f64,
+    /// Horizontal and vertical scales from glyph units to the design's units.
+    x_scale: f64,
+    y_scale: f64,
+    /// The extra space after each character of a shaped font, which may be negative.
+    tracking: f64,
+    /// The width of a space of a shaped font, as a fraction of the font's own space.
+    word_ratio: f64,
+}
+
+impl Spacing {
+    /// The character spacing, in percent, at which a shaped font keeps its own spacing. It is the
+    /// default, which for stroke fonts is the usual gap between letters.
+    const NATURAL_CHAR_PERCENT: f64 = 25.0;
+}
+
+/// Positioned strokes, before justification.
+struct Placement {
+    segments: Vec<Segment>,
+    /// The right edge of each line.
+    line_max_x: Vec<f64>,
+    /// Characters the font has no glyph for.
+    missing_chars: Vec<char>,
+}
+
+impl Placement {
+    /// Places each character by the width of its own strokes, as F-Engrave does. This is how
+    /// stroke fonts, drawings, and pages of a font are laid out.
+    fn per_character(font: &Font, text: &str, sp: &Spacing) -> Self {
+        let mut placed = Self {
+            segments: Vec::new(),
+            line_max_x: Vec::new(),
+            missing_chars: Vec::new(),
+        };
+        let (mut x_pos, mut y_pos) = (0.0_f64, 0.0_f64);
+        let mut cur_line_max = f64::NEG_INFINITY;
+        let mut line = 0_usize;
+        for (index, ch) in text.chars().enumerate() {
+            match ch {
+                ' ' => x_pos += sp.word,
+                '\t' => x_pos += 3.0 * sp.word,
+                '\n' => {
+                    x_pos = 0.0;
+                    y_pos += sp.line;
+                    line += 1;
+                    placed.line_max_x.push(cur_line_max);
+                    cur_line_max = f64::NEG_INFINITY;
+                }
+                _ => {
+                    let Some(glyph) = font.glyph(ch) else {
+                        if !placed.missing_chars.contains(&ch) {
+                            placed.missing_chars.push(ch);
+                        }
+                        continue;
+                    };
+                    placed.push_glyph(glyph, (x_pos, 0.0, y_pos), (line, index + 1), sp);
+                    cur_line_max = placed.line_max_x_after(cur_line_max, glyph, x_pos, sp);
+                    x_pos += sp.char + glyph.x_max();
+                }
+            }
+        }
+        placed.line_max_x.push(cur_line_max);
+        placed
+    }
+
+    /// Places glyphs as the font's shaper chooses and spaces them: kerning, ligatures, and
+    /// marks come from the font, and each line is shaped as a whole.
+    fn shaped(shaper: &Shaper, text: &str, sp: &Spacing) -> Self {
+        let mut placed = Self {
+            segments: Vec::new(),
+            line_max_x: Vec::new(),
+            missing_chars: Vec::new(),
+        };
+        let space_advance = shaper
+            .shape(" ")
+            .first()
+            .map_or(0.0, |g| g.x_advance * sp.word_ratio);
+        let mut chars_before = 0_usize;
+        for (line, text_line) in text.split('\n').enumerate() {
+            let y_pos = sp.line * line as f64;
+            let mut x_pos = 0.0_f64;
+            let mut cur_line_max = f64::NEG_INFINITY;
+            for (n, run) in text_line.split('\t').enumerate() {
+                if n > 0 {
+                    x_pos += 3.0 * space_advance;
+                    chars_before += 1;
+                }
+                let mut previous_cluster = None;
+                for glyph in shaper.shape(run) {
+                    let ch = run[glyph.cluster..].chars().next().unwrap_or(' ');
+                    let number = chars_before + run[..glyph.cluster].chars().count() + 1;
+                    let strokes = shaper.glyph(glyph.id);
+                    if glyph.id == 0 {
+                        if !placed.missing_chars.contains(&ch) {
+                            placed.missing_chars.push(ch);
+                        }
+                        continue;
+                    }
+                    placed.push_glyph(
+                        &strokes,
+                        (x_pos + glyph.x_offset, glyph.y_offset, y_pos),
+                        (line, number),
+                        sp,
+                    );
+                    cur_line_max =
+                        placed.line_max_x_after(cur_line_max, &strokes, x_pos + glyph.x_offset, sp);
+                    x_pos += if ch == ' ' {
+                        space_advance
+                    } else {
+                        glyph.x_advance
+                    };
+                    // Spacing goes between characters, not between a letter and its marks.
+                    if previous_cluster != Some(glyph.cluster) {
+                        x_pos += sp.tracking;
+                    }
+                    previous_cluster = Some(glyph.cluster);
+                }
+                chars_before += run.chars().count();
+            }
+            chars_before += 1;
+            placed.line_max_x.push(cur_line_max);
+        }
+        placed
+    }
+
+    /// Adds the strokes of `glyph`, with its origin at `(x, rise)` on the baseline `y_pos` below
+    /// the first line.
+    fn push_glyph(
+        &mut self,
+        glyph: &Glyph,
+        (x, rise, y_pos): (f64, f64, f64),
+        (line, number): (usize, usize),
+        sp: &Spacing,
+    ) {
+        for stroke in &glyph.strokes {
+            self.segments.push(Segment::new(
+                (stroke.x1 + x) * sp.x_scale,
+                (stroke.y1 + rise - y_pos) * sp.y_scale,
+                (stroke.x2 + x) * sp.x_scale,
+                (stroke.y2 + rise - y_pos) * sp.y_scale,
+                line,
+                number,
+            ));
+        }
+    }
+
+    /// The right edge of the line once `glyph` is placed at `x`.
+    fn line_max_x_after(&self, current: f64, glyph: &Glyph, x: f64, sp: &Spacing) -> f64 {
+        glyph
+            .strokes
+            .iter()
+            .flat_map(|s| [s.x1, s.x2])
+            .fold(current, |max, gx| max.max((gx + x) * sp.x_scale))
+    }
 }
 
 /// Extents of the glyphs that determine scale.
@@ -120,43 +284,27 @@ impl Design {
         };
 
         // Place strokes, tracking the extent of each line.
-        let mut segments: Vec<Segment> = Vec::new();
-        let mut line_max_x: Vec<f64> = Vec::new();
-        let mut missing_chars: Vec<char> = Vec::new();
-        let (mut x_pos, mut y_pos) = (0.0_f64, 0.0_f64);
-        let mut cur_line_max = f64::NEG_INFINITY;
-        let mut line = 0_usize;
-        for (index, ch) in text.chars().enumerate() {
-            match ch {
-                ' ' => x_pos += word_space,
-                '\t' => x_pos += 3.0 * word_space,
-                '\n' => {
-                    x_pos = 0.0;
-                    y_pos += line_space;
-                    line += 1;
-                    line_max_x.push(cur_line_max);
-                    cur_line_max = f64::NEG_INFINITY;
-                }
-                _ => {
-                    let Some(glyph) = font.glyph(ch) else {
-                        if !missing_chars.contains(&ch) {
-                            missing_chars.push(ch);
-                        }
-                        continue;
-                    };
-                    for stroke in &glyph.strokes {
-                        let x1 = (stroke.x1 + x_pos) * x_scale;
-                        let y1 = (stroke.y1 - y_pos) * y_scale;
-                        let x2 = (stroke.x2 + x_pos) * x_scale;
-                        let y2 = (stroke.y2 - y_pos) * y_scale;
-                        segments.push(Segment::new(x1, y1, x2, y2, line, index + 1));
-                        cur_line_max = cur_line_max.max(x1).max(x2);
-                    }
-                    x_pos += char_space + glyph.x_max();
-                }
-            }
-        }
-        line_max_x.push(cur_line_max);
+        let spacing = Spacing {
+            word: word_space,
+            char: char_space,
+            line: line_space,
+            x_scale,
+            y_scale,
+            tracking: char_width * (settings.char_space - Spacing::NATURAL_CHAR_PERCENT) / 100.0,
+            word_ratio: settings.word_space / 100.0,
+        };
+        let shaper = font
+            .shaper
+            .as_ref()
+            .filter(|_| settings.input_type == InputType::Text);
+        let Placement {
+            mut segments,
+            line_max_x,
+            missing_chars,
+        } = match shaper {
+            Some(shaper) => Placement::shaped(shaper, &text, &spacing),
+            None => Placement::per_character(font, &text, &spacing),
+        };
 
         // Justify lines against the longest line.
         let longest = line_max_x.iter().copied().fold(f64::NEG_INFINITY, f64::max);
@@ -673,6 +821,104 @@ mod tests {
         };
         let d = Design::layout(&font, &s).unwrap();
         assert_eq!(d.segments.len(), 3 * 4);
+    }
+
+    fn ubuntu() -> Font {
+        Font::from_outline_font(
+            epaint_default_fonts::UBUNTU_LIGHT,
+            0,
+            5.0,
+            &Font::codes_in(1..=0xFF),
+        )
+        .unwrap()
+    }
+
+    /// The right edge of the design of `text` in the shaped font.
+    fn right_edge(font: &Font, text: &str) -> f64 {
+        let s = Settings {
+            text: text.into(),
+            ..base()
+        };
+        Design::layout(font, &s).unwrap().bounds.max_x
+    }
+
+    #[test]
+    fn shaped_text_is_kerned() {
+        let font = ubuntu();
+        let kerned = right_edge(&font, "AV");
+        let unshaped = Font {
+            shaper: None,
+            ..font.clone()
+        };
+        let plain = right_edge(&unshaped, "AV");
+        // Per-character placement leaves the pair uncorrected and adds the default gap.
+        assert!(kerned < plain, "{kerned} vs {plain}");
+    }
+
+    #[test]
+    fn shaped_text_at_natural_spacing_matches_the_shaper() {
+        let font = ubuntu();
+        let shaper = font.shaper.as_ref().unwrap();
+        let glyphs = shaper.shape("AV");
+        let v = shaper.glyph(glyphs[1].id);
+        let s = Settings {
+            text: "AV".into(),
+            char_space: 25.0,
+            y_scale: 9.0,
+            ..base()
+        };
+        let design = Design::layout(&font, &s).unwrap();
+        let metrics = Design::line_metrics(&font, "AV", s.height_calc).unwrap();
+        let scale = 9.0 / (metrics.height - metrics.depth);
+        let expected = (glyphs[0].x_advance + glyphs[1].x_offset + v.x_max()) * scale;
+        assert_abs_diff_eq!(design.bounds.max_x, expected, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn spacing_percent_adds_tracking_to_shaped_text() {
+        let font = ubuntu();
+        let at = |percent: f64| {
+            let s = Settings {
+                text: "iii".into(),
+                char_space: percent,
+                ..base()
+            };
+            Design::layout(&font, &s).unwrap().bounds.width()
+        };
+        assert!(at(50.0) > at(25.0));
+        assert!(at(0.0) < at(25.0));
+    }
+
+    #[test]
+    fn spaces_tabs_and_lines_are_placed_when_shaped() {
+        let font = ubuntu();
+        let one = right_edge(&font, "ab");
+        assert!(right_edge(&font, "a b") > one);
+        assert!(right_edge(&font, "a\tb") > right_edge(&font, "a b"));
+        let s = Settings {
+            text: "ab\ncd".into(),
+            ..base()
+        };
+        let d = Design::layout(&font, &s).unwrap();
+        assert!(d.segments.iter().any(|s| s.line == 1));
+        let numbers: std::collections::BTreeSet<usize> = d
+            .segments
+            .iter()
+            .filter(|s| s.line == 1)
+            .map(|s| s.char_num)
+            .collect();
+        assert_eq!(numbers.into_iter().collect::<Vec<_>>(), [4, 5]);
+    }
+
+    #[test]
+    fn shaped_text_reports_characters_the_font_lacks() {
+        let font = ubuntu();
+        let s = Settings {
+            text: "a\u{4e00}b".into(),
+            ..base()
+        };
+        let d = Design::layout(&font, &s).unwrap();
+        assert_eq!(d.missing_chars, ['\u{4e00}']);
     }
 
     #[test]

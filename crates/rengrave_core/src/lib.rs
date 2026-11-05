@@ -48,6 +48,7 @@ pub mod geom;
 mod job;
 mod progress;
 pub mod settings;
+pub mod shaping;
 pub mod simulate;
 pub mod sort;
 pub mod trace;

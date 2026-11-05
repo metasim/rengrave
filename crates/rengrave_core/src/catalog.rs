@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 /// Which font a job uses.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -368,7 +368,7 @@ impl FontCatalog {
                 None => system.default_face().ok_or_else(Self::no_system_fonts)?,
             }
         };
-        Font::from_outline_font(blob.as_ref(), face, seg_arc, wanted)
+        Font::from_outline_data(Arc::new(blob), face, seg_arc, wanted)
     }
 
     #[cfg(not(feature = "system-fonts"))]

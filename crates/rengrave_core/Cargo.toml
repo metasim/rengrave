@@ -19,6 +19,7 @@ clipper2-rust.workspace = true
 directories.workspace = true
 serde.workspace = true
 serde_norway.workspace = true
+harfrust.workspace = true
 skrifa.workspace = true
 image.workspace = true
 fontique = { workspace = true, optional = true }

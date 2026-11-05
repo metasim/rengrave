@@ -15,7 +15,9 @@ reference programs. It runs with no helper programs and uses the fonts installed
   depth limits, and prismatic cuts for inlays
 - **Engraving** of outlines at constant depth
 - **Text** in any installed font, or in CXF stroke fonts and TrueType/OpenType files you add to
-  your font library, with justification, spacing, rotation, mirroring, and placement on a circle
+  your font library, with justification, spacing, rotation, mirroring, and placement on a circle.
+  TrueType and OpenType text is shaped like egui's text: kerning, ligatures, combining marks, and
+  the rules of scripts such as Arabic and Devanagari come from the font
 - **Font pages**: lay out the characters of a font, one Unicode block at a time (large blocks in
   pages of 500), to see what a font contains, to engrave a specimen, or to copy its characters as text
 - **Images**: DXF drawings, plus PNG, BMP, PBM/PGM/PPM, JPEG, GIF, and TIFF bitmaps through a

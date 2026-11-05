@@ -457,7 +457,7 @@ impl RengraveApp {
                     Number {
                         label: "Character spacing",
                         field: "char_space",
-                        tip: "Gap between characters, as a percentage of the widest character",
+                        tip: "Gap between characters, as a percentage of the widest character. For TrueType and OpenType fonts, 25% keeps the font's own spacing; more or less loosens or tightens it.",
                         suffix: PERCENT,
                         speed: 0.5,
                     },
@@ -468,7 +468,7 @@ impl RengraveApp {
                     Number {
                         label: "Word spacing",
                         field: "word_space",
-                        tip: "Width of a space, as a percentage of the widest character",
+                        tip: "Width of a space, as a percentage of the widest character. For TrueType and OpenType fonts, 100% is the font's own space.",
                         suffix: PERCENT,
                         speed: 0.5,
                     },

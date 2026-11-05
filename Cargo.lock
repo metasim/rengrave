@@ -3082,6 +3082,7 @@ dependencies = [
  "epaint_default_fonts",
  "fontique",
  "glam",
+ "harfrust",
  "image",
  "serde",
  "serde_norway",
