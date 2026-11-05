@@ -221,6 +221,9 @@ impl Font {
             .map(|(code, _)| code)
             .filter(|&code| code != 0)
             .collect();
+        // A symbol font, such as Wingdings, keeps its characters at U+F020 and up in its table,
+        // but is used with the codes 0x20 to 0xFF, and the charmap answers to those as well.
+        available.extend((1..=0xFF).filter(|&code| charmap.map(code).is_some()));
         available.sort_unstable();
         available.dedup();
         let mut font = Self {
@@ -518,6 +521,20 @@ mod tests {
         assert!(!basic.contains('\u{7f}'), "no control characters");
         assert!(coverage.chars_in(0xE9..=0xE9) == "\u{e9}");
         assert!(coverage.chars_in(0x4E00..=0x4E10).is_empty());
+    }
+
+    /// Wingdings 3 is a symbol font; this checks it when the machine has it, which most do not.
+    #[test]
+    fn symbol_fonts_list_the_codes_they_are_typed_with() {
+        let fonts = crate::FontCatalog::with_system_fonts();
+        let family = crate::FontRef::System("Wingdings 3".into());
+        if !fonts.contains(&family) {
+            return;
+        }
+        let font = fonts.load(&family, 5.0, &Font::codes_in(1..=0xFF)).unwrap();
+        let coverage = font.coverage();
+        assert!(coverage.latin > 100, "{}", coverage.latin);
+        assert!(!coverage.chars_in(0..=0xFF).is_empty());
     }
 
     #[test]
