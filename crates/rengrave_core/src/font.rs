@@ -11,6 +11,7 @@
 //! [`Font`] whose glyphs are lists of straight strokes.
 
 use crate::error::{Error, Result};
+use crate::portable_math::PortableMath as _;
 use crate::shaping::{FontData, OutlineReader, Shaper};
 use crate::unicode_blocks::UnicodeBlock;
 use skrifa::MetadataProvider;
@@ -339,7 +340,7 @@ impl OutlineSink {
             let b = eval(mid);
             let (ab, bc) = ((b.0 - a.0, b.1 - a.1), (c.0 - b.0, c.1 - b.1));
             let turn = (ab.0 * bc.1 - ab.1 * bc.0)
-                .atan2(ab.0 * bc.0 + ab.1 * bc.1)
+                .portable_atan2(ab.0 * bc.0 + ab.1 * bc.1)
                 .abs();
             if turn > turn_limit && depth < MAX_DEPTH {
                 pending.push((mid, hi, depth + 1));
@@ -463,13 +464,13 @@ impl Font {
         }
         let segs = ((end - start) / seg_arc) as usize + 1;
         let incr = (end - start) / segs as f64;
-        let mut x0 = start.to_radians().cos() * r + xc;
-        let mut y0 = start.to_radians().sin() * r + yc;
+        let mut x0 = start.to_radians().portable_cos() * r + xc;
+        let mut y0 = start.to_radians().portable_sin() * r + yc;
         let mut angle = start;
         for _ in 0..segs {
             angle += incr;
-            let x1 = angle.to_radians().cos() * r + xc;
-            let y1 = angle.to_radians().sin() * r + yc;
+            let x1 = angle.to_radians().portable_cos() * r + xc;
+            let y1 = angle.to_radians().portable_sin() * r + yc;
             strokes.push(Stroke::new(x0, y0, x1, y1));
             x0 = x1;
             y0 = y1;
@@ -555,8 +556,8 @@ mod tests {
         let strokes = &font.glyph('O').unwrap().strokes;
         assert_eq!(strokes.len(), 37);
         for s in strokes {
-            assert_abs_diff_eq!((s.x1 - 1.0).hypot(s.y1 - 2.0), 3.0, epsilon = 1e-9);
-            assert_abs_diff_eq!((s.x2 - 1.0).hypot(s.y2 - 2.0), 3.0, epsilon = 1e-9);
+            assert_abs_diff_eq!((s.x1 - 1.0).portable_hypot(s.y1 - 2.0), 3.0, epsilon = 1e-9);
+            assert_abs_diff_eq!((s.x2 - 1.0).portable_hypot(s.y2 - 2.0), 3.0, epsilon = 1e-9);
         }
         for pair in strokes.windows(2) {
             assert_abs_diff_eq!(pair[0].x2, pair[1].x1, epsilon = 1e-12);
@@ -664,14 +665,17 @@ mod tests {
         let mut sink = OutlineSink::new(10f64.to_radians());
         sink.flatten(|t| {
             let a = t * std::f64::consts::TAU;
-            (5.0 * a.cos(), 5.0 * a.sin())
+            (5.0 * a.portable_cos(), 5.0 * a.portable_sin())
         });
         assert!(sink.strokes.len() >= 36, "{}", sink.strokes.len());
         for w in sink.strokes.windows(2) {
             assert_eq!((w[0].x2, w[0].y2), (w[1].x1, w[1].y1), "strokes connect");
-            let a = (w[0].y2 - w[0].y1).atan2(w[0].x2 - w[0].x1);
-            let b = (w[1].y2 - w[1].y1).atan2(w[1].x2 - w[1].x1);
-            let turn = (b - a).sin().atan2((b - a).cos()).abs();
+            let a = (w[0].y2 - w[0].y1).portable_atan2(w[0].x2 - w[0].x1);
+            let b = (w[1].y2 - w[1].y1).portable_atan2(w[1].x2 - w[1].x1);
+            let turn = (b - a)
+                .portable_sin()
+                .portable_atan2((b - a).portable_cos())
+                .abs();
             assert!(turn <= 10.5f64.to_radians(), "{}", turn.to_degrees());
         }
         let (f, l) = (sink.strokes[0], sink.strokes[sink.strokes.len() - 1]);

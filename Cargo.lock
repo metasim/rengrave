@@ -3084,6 +3084,7 @@ dependencies = [
  "glam",
  "harfrust",
  "image",
+ "libm",
  "serde",
  "serde_norway",
  "skrifa",

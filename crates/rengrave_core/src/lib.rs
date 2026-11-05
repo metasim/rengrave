@@ -46,6 +46,7 @@ pub mod font;
 pub mod gcode;
 pub mod geom;
 mod job;
+pub mod portable_math;
 mod progress;
 pub mod settings;
 pub mod shaping;

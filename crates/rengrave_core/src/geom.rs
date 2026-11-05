@@ -6,6 +6,8 @@
 
 //! Planar geometry primitives shared by the toolpath algorithms.
 
+use crate::portable_math::PortableMath as _;
+
 /// Distance below which two coordinates are considered coincident.
 pub const ZERO: f64 = 0.00001;
 
@@ -26,7 +28,7 @@ impl Point {
 
     /// Returns this point rotated counter-clockwise about the origin by `angle` radians.
     pub fn rotated(self, angle: f64) -> Self {
-        let (sin, cos) = angle.sin_cos();
+        let (sin, cos) = angle.portable_sin_cos();
         Self::new(self.x * cos - self.y * sin, self.x * sin + self.y * cos)
     }
 
@@ -67,7 +69,7 @@ impl Point {
 ///
 /// Values marginally outside `-1..=1` are clamped, so rounding error cannot produce NaN.
 pub fn angle_from_sin_cos(sin: f64, cos: f64) -> f64 {
-    let acos = cos.clamp(-1.0, 1.0).acos().to_degrees();
+    let acos = cos.clamp(-1.0, 1.0).portable_acos().to_degrees();
     if sin >= 0.0 { acos } else { 360.0 - acos }
 }
 
@@ -186,7 +188,7 @@ mod tests {
     #[test]
     fn angle_covers_all_quadrants() {
         for deg in [0.0_f64, 30.0, 90.0, 135.0, 180.0, 225.0, 270.0, 300.0] {
-            let (s, c) = deg.to_radians().sin_cos();
+            let (s, c) = deg.to_radians().portable_sin_cos();
             assert_abs_diff_eq!(angle_from_sin_cos(s, c), deg, epsilon = 1e-9);
         }
     }

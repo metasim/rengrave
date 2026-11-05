@@ -13,6 +13,7 @@
 
 use crate::catalog::FontRef;
 use crate::geom::round_significant;
+use crate::portable_math::PortableMath as _;
 use crate::unicode_blocks::UnicodeBlock;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
@@ -779,11 +780,11 @@ impl Settings {
     pub fn effective_bit_dia(&self) -> f64 {
         let half_angle = self.half_angle();
         if self.inlay && self.bit_shape == BitShape::VBit {
-            return (-2.0 * self.allowance * half_angle.tan()).max(0.001);
+            return (-2.0 * self.allowance * half_angle.portable_tan()).max(0.001);
         }
         if self.v_depth_limit < 0.0 {
             match self.bit_shape {
-                BitShape::VBit => return -2.0 * self.v_depth_limit * half_angle.tan(),
+                BitShape::VBit => return -2.0 * self.v_depth_limit * half_angle.portable_tan(),
                 BitShape::Ball => {
                     let r = self.v_bit_dia / 2.0;
                     if self.v_depth_limit > -r {
@@ -799,7 +800,7 @@ impl Settings {
     /// Deepest Z the bit reaches, rounded to three decimals.
     pub fn max_cut_depth(&self) -> f64 {
         let bit_depth = match self.bit_shape {
-            BitShape::VBit => -self.v_bit_dia / 2.0 / self.half_angle().tan(),
+            BitShape::VBit => -self.v_bit_dia / 2.0 / self.half_angle().portable_tan(),
             BitShape::Ball | BitShape::Flat => -self.v_bit_dia / 2.0,
         };
         let limit = self.v_depth_limit;
@@ -1557,7 +1558,10 @@ mod tests {
             v_depth_limit: -0.1,
             ..Settings::default()
         };
-        assert_abs_diff_eq!(s.effective_bit_dia(), 2.0 * 0.1 * 30f64.to_radians().tan());
+        assert_abs_diff_eq!(
+            s.effective_bit_dia(),
+            2.0 * 0.1 * 30f64.to_radians().portable_tan()
+        );
         assert_abs_diff_eq!(s.max_cut_depth(), -0.1);
     }
 
@@ -1603,7 +1607,10 @@ mod tests {
             allowance: -0.05,
             ..Settings::default()
         };
-        assert_abs_diff_eq!(s.effective_bit_dia(), 2.0 * 0.05 * 30f64.to_radians().tan());
+        assert_abs_diff_eq!(
+            s.effective_bit_dia(),
+            2.0 * 0.05 * 30f64.to_radians().portable_tan()
+        );
         s.allowance = 0.0;
         assert_abs_diff_eq!(s.effective_bit_dia(), 0.001);
     }

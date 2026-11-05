@@ -14,6 +14,7 @@
 use crate::error::{Error, Result};
 use crate::font::Stroke;
 use crate::geom::{Point, ZERO, angle_from_sin_cos};
+use crate::portable_math::PortableMath as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Limit on nested `INSERT`s, which also stops self-referencing blocks.
@@ -322,10 +323,10 @@ impl Reader {
     ) {
         let start = start_deg.to_radians();
         let step = step_deg.to_radians();
-        let mut p0 = (x + r * start.cos(), y + r * start.sin());
+        let mut p0 = (x + r * start.portable_cos(), y + r * start.portable_sin());
         for i in 1..=steps {
             let phi = start + i as f64 * step;
-            let p1 = (x + r * phi.cos(), y + r * phi.sin());
+            let p1 = (x + r * phi.portable_cos(), y + r * phi.portable_sin());
             self.add(p0.0, p0.1, p1.0, p1.1, place);
             p0 = p1;
         }
@@ -374,13 +375,15 @@ impl Reader {
         if end < start {
             end += std::f64::consts::TAU;
         }
-        let rotation = ym.atan2(xm);
-        let a = xm.hypot(ym);
+        let rotation = ym.portable_atan2(xm);
+        let a = xm.portable_hypot(ym);
         let b = a * ratio;
         let at = |phi: f64| {
             (
-                xc + (a * phi.cos() * rotation.cos() - b * phi.sin() * rotation.sin()),
-                yc + (a * phi.cos() * rotation.sin() + b * phi.sin() * rotation.cos()),
+                xc + (a * phi.portable_cos() * rotation.portable_cos()
+                    - b * phi.portable_sin() * rotation.portable_sin()),
+                yc + (a * phi.portable_cos() * rotation.portable_sin()
+                    + b * phi.portable_sin() * rotation.portable_cos()),
             )
         };
         let tol = self.tol_deg.to_radians();
@@ -396,11 +399,11 @@ impl Reader {
             let test = at(phi + step / 2.0);
             let (dx1, dy1) = (test.0 - p1.0, test.1 - p1.1);
             let (dx2, dy2) = (p2.0 - test.0, p2.1 - test.1);
-            let (l1, l2) = (dx1.hypot(dy1), dx2.hypot(dy2));
+            let (l1, l2) = (dx1.portable_hypot(dy1), dx2.portable_hypot(dy2));
             let angle = if l1 > 0.0 && l2 > 0.0 {
                 (dx1 / l1 * dx2 / l2 + dy1 / l1 * dy2 / l2)
                     .clamp(-1.0, 1.0)
-                    .acos()
+                    .portable_acos()
             } else {
                 0.0
             };
@@ -564,18 +567,22 @@ impl Nurbs {
             }
             let p2 = self.eval(u + step);
             let test = self.eval(u + step / 2.0);
-            let chord = (p2.0 - p1.0).hypot(p2.1 - p1.1);
-            let t = (test.0 - (p1.0 + p2.0) / 2.0).hypot(test.1 - (p1.1 + p2.1) / 2.0);
+            let chord = (p2.0 - p1.0).portable_hypot(p2.1 - p1.1);
+            let t = (test.0 - (p1.0 + p2.0) / 2.0).portable_hypot(test.1 - (p1.1 + p2.1) / 2.0);
             let radius = if t.abs() > ZERO {
                 (chord * chord / 4.0 + t * t) / (2.0 * t)
             } else {
                 0.0
             };
-            let l1 = (test.0 - p1.0).hypot(test.1 - p1.1);
-            let l2 = (p2.0 - test.0).hypot(p2.1 - test.1);
+            let l1 = (test.0 - p1.0).portable_hypot(test.1 - p1.1);
+            let l2 = (p2.0 - test.0).portable_hypot(p2.1 - test.1);
             let angle = if l1 > ZERO && l2 > ZERO && radius > ZERO {
                 let ratio = (chord / 2.0) / radius;
-                2.0 * if ratio.abs() > 1.0 { 0.0 } else { ratio.asin() }
+                2.0 * if ratio.abs() > 1.0 {
+                    0.0
+                } else {
+                    ratio.portable_asin()
+                }
             } else {
                 0.0
             };
@@ -694,13 +701,13 @@ impl Reader {
         let sign = if bulge < 0.0 { 1.0 } else { -1.0 };
         let bulge = bulge.abs();
         let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-        let c = dx.hypot(dy);
+        let c = dx.portable_hypot(dy);
         if c < ZERO {
             return vec![Stroke::new(a.0, a.1, b.0, b.1)];
         }
-        let alpha = 2.0 * bulge.atan();
-        let radius = c / (2.0 * alpha.sin());
-        let l = radius * alpha.cos();
+        let alpha = 2.0 * bulge.portable_atan();
+        let radius = c / (2.0 * alpha.portable_sin());
+        let l = radius * alpha.portable_cos();
         let steps = (2.0 * alpha / tol_deg.to_radians()).ceil().max(1.0);
         let phi = angle_from_sin_cos(dy / c, dx / c).to_radians();
         let d_theta = 2.0 * alpha / steps;
@@ -708,8 +715,8 @@ impl Reader {
         let mut out = Vec::with_capacity(steps as usize);
         let mut cur = a;
         for _ in 1..steps as usize {
-            let xp = c / 2.0 - radius * theta.sin();
-            let yp = radius * theta.cos() - l;
+            let xp = c / 2.0 - radius * theta.portable_sin();
+            let yp = radius * theta.portable_cos() - l;
             let p = Point::new(xp, yp * sign).rotated(phi);
             let next = (p.x + a.0, p.y + a.1);
             out.push(Stroke::new(cur.0, cur.1, next.0, next.1));
@@ -780,7 +787,7 @@ mod tests {
         assert_eq!(d.strokes.len(), 18);
         assert_chained(&d.strokes);
         for s in &d.strokes {
-            assert_abs_diff_eq!((s.x1 - 1.0).hypot(s.y1 - 1.0), 2.0, epsilon = 1e-9);
+            assert_abs_diff_eq!((s.x1 - 1.0).portable_hypot(s.y1 - 1.0), 2.0, epsilon = 1e-9);
             assert!(s.x1 >= 1.0 - 1e-9, "should go through +X");
         }
     }
@@ -822,7 +829,7 @@ mod tests {
             "positive bulge is to the right of travel"
         );
         for s in &d.strokes {
-            assert_abs_diff_eq!((s.x1 - 1.0).hypot(s.y1), 1.0, epsilon = 1e-9);
+            assert_abs_diff_eq!((s.x1 - 1.0).portable_hypot(s.y1), 1.0, epsilon = 1e-9);
         }
     }
 
@@ -1015,7 +1022,7 @@ mod tests {
         .unwrap();
         for u in [0.0, 0.1, 0.25, 0.5, 0.9, 1.0] {
             let p = curve.eval(u);
-            assert_abs_diff_eq!(p.0.hypot(p.1), 1.0, epsilon = 1e-12);
+            assert_abs_diff_eq!(p.0.portable_hypot(p.1), 1.0, epsilon = 1e-12);
         }
         let pts = curve.flatten(5.0);
         assert!(pts.len() >= 10);

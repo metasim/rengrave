@@ -9,6 +9,7 @@
 use crate::error::{Error, Result};
 use crate::font::{Font, Glyph, IMAGE_GLYPH};
 use crate::geom::{Bounds, Point, Segment, ZERO};
+use crate::portable_math::PortableMath as _;
 use crate::settings::{CutType, HeightCalc, InputType, Justify, Origin, Settings};
 use crate::shaping::{ShapeFeatures, Shaper};
 
@@ -206,17 +207,21 @@ impl Design {
         let (xx, yy, alpha) = if radius != 0.0 {
             let alpha = x / radius;
             (
-                (radius + y) * alpha.sin(),
-                (radius + y) * alpha.cos(),
+                (radius + y) * alpha.portable_sin(),
+                (radius + y) * alpha.portable_cos(),
                 alpha,
             )
         } else {
             (x, y, 0.0)
         };
         let rad = (xx * xx + yy * yy).sqrt();
-        let theta = yy.atan2(xx);
+        let theta = yy.portable_atan2(xx);
         let new_angle = theta + angle.to_radians();
-        (rad * new_angle.cos(), rad * new_angle.sin(), alpha)
+        (
+            rad * new_angle.portable_cos(),
+            rad * new_angle.portable_sin(),
+            alpha,
+        )
     }
 
     /// Positions the text or drawing described by `settings` using the glyphs in `font`.
@@ -727,7 +732,7 @@ mod tests {
         };
         let d = Design::layout(&box_font("A"), &s).unwrap();
         for seg in &d.segments {
-            let r = seg.x1.hypot(seg.y1);
+            let r = seg.x1.portable_hypot(seg.y1);
             assert!((20.0 - 1e-9..=29.0 + 1e-9).contains(&r), "radius {r}");
         }
     }
@@ -741,7 +746,7 @@ mod tests {
         };
         let d = Design::layout(&box_font("A"), &s).unwrap();
         for seg in &d.segments {
-            let r = seg.x1.hypot(seg.y1);
+            let r = seg.x1.portable_hypot(seg.y1);
             assert!((11.0 - 1e-9..=20.0 + 1e-9).contains(&r), "radius {r}");
         }
     }
