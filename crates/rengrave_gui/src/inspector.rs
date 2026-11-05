@@ -99,6 +99,11 @@ impl RengraveApp {
         CollapsingHeader::new(ui.section_heading("Size and spacing"))
             .default_open(true)
             .show(ui, |ui| self.size_section(ui));
+        if self.settings.input_type.uses_font() {
+            CollapsingHeader::new(ui.section_heading("Advanced spacing"))
+                .default_open(false)
+                .show(ui, |ui| self.spacing_section(ui));
+        }
         CollapsingHeader::new(ui.section_heading("Position"))
             .default_open(true)
             .show(ui, |ui| self.position_section(ui));
@@ -455,28 +460,6 @@ impl RengraveApp {
                 form.number(
                     ui,
                     Number {
-                        label: "Character spacing",
-                        field: "char_space",
-                        tip: "Gap between characters, as a percentage of the widest character. For TrueType and OpenType fonts, 25% keeps the font's own spacing; more or less loosens or tightens it.",
-                        suffix: PERCENT,
-                        speed: 0.5,
-                    },
-                    &mut s.char_space,
-                );
-                form.number(
-                    ui,
-                    Number {
-                        label: "Word spacing",
-                        field: "word_space",
-                        tip: "Width of a space, as a percentage of the widest character. For TrueType and OpenType fonts, 100% is the font's own space.",
-                        suffix: PERCENT,
-                        speed: 0.5,
-                    },
-                    &mut s.word_space,
-                );
-                form.number(
-                    ui,
-                    Number {
                         label: "Line spacing",
                         field: "line_space",
                         tip: "Distance between lines, as a multiple of the text height",
@@ -513,6 +496,43 @@ impl RengraveApp {
                 );
                 ui.end_row();
             }
+        });
+    }
+
+    /// Adjustments to the spacing that the font and its shaper set; rarely needed for fonts.
+    fn spacing_section(&mut self, ui: &mut Ui) {
+        ui.weak(
+            "TrueType and OpenType fonts keep their own spacing and kerning at the default values.",
+        );
+        let issues = self.issues.clone();
+        let mut form = Form {
+            issues: &issues,
+            length_unit: self.unit(),
+        };
+        let s = &mut self.settings;
+        ui.form_grid("spacing_grid", |ui| {
+            form.number(
+                    ui,
+                    Number {
+                        label: "Character spacing",
+                        field: "char_space",
+                        tip: "Gap between characters, as a percentage of the widest character. For TrueType and OpenType fonts, 25% keeps the font's own spacing; more or less loosens or tightens it.",
+                        suffix: PERCENT,
+                        speed: 0.5,
+                    },
+                    &mut s.char_space,
+                );
+            form.number(
+                    ui,
+                    Number {
+                        label: "Word spacing",
+                        field: "word_space",
+                        tip: "Width of a space, as a percentage of the widest character. For TrueType and OpenType fonts, 100% is the font's own space.",
+                        suffix: PERCENT,
+                        speed: 0.5,
+                    },
+                    &mut s.word_space,
+                );
         });
     }
 
