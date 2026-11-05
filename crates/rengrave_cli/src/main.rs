@@ -5,6 +5,7 @@
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rengrave_core::font::Font;
+use rengrave_core::unicode_blocks::UnicodeBlock;
 use rengrave_core::{
     AppSettings, ArcFit, BitShape, CheckScope, CleanupBit, CutType, FontCatalog, FontRef,
     GcodeProgram, InputType, Job, Justify, Origin, Progress, Settings, Tracer, Units,
@@ -160,6 +161,25 @@ struct JobArgs {
         conflicts_with = "font"
     )]
     font_file: Option<PathBuf>,
+    /// Engrave a page of the font's characters instead of text. The value is a Unicode block
+    /// name such as "Greek and Coptic", or "latin" for Basic Latin and Latin-1 Supplement.
+    #[arg(
+        long,
+        value_name = "BLOCK",
+        help_heading = "Input",
+        conflicts_with_all = ["text", "image"]
+    )]
+    font_page: Option<String>,
+    /// Page of the Unicode block to engrave with --font-page, counted from 1. Blocks with more
+    /// than 500 characters are split into pages.
+    #[arg(
+        long,
+        value_name = "N",
+        help_heading = "Input",
+        requires = "font_page",
+        value_parser = clap::value_parser!(u32).range(1..)
+    )]
+    page: Option<u32>,
     /// DXF drawing or raster image (PNG, BMP, PBM, JPEG, GIF, TIFF) to engrave instead of text.
     #[arg(
         short,
@@ -307,6 +327,19 @@ impl JobArgs {
         if let Some(path) = &self.font_file {
             s.font = FontRef::User(Self::font_file_name(path));
         }
+        if let Some(block) = &self.font_page {
+            s.input_type = InputType::FontPage;
+            s.font_block = if block.eq_ignore_ascii_case("latin") {
+                String::new()
+            } else {
+                UnicodeBlock::all()
+                    .iter()
+                    .find(|b| b.name.eq_ignore_ascii_case(block))
+                    .map(|b| b.name.to_string())
+                    .ok_or_else(|| format!("--font-page: unknown Unicode block {block:?}"))?
+            };
+            s.font_page = self.page.map_or(0, |n| n - 1);
+        }
         if let Some(image) = &self.image {
             s.image_file.clone_from(image);
             s.input_type = InputType::Image;
@@ -429,7 +462,7 @@ impl JobArgs {
     /// The fonts this run can use. Installed fonts are scanned only when the job needs them.
     fn font_catalog(&self, settings: &rengrave_core::Settings) -> Result<FontCatalog, String> {
         let needs_system =
-            settings.input_type == InputType::Text && !matches!(settings.font, FontRef::User(_));
+            settings.input_type.uses_font() && !matches!(settings.font, FontRef::User(_));
         let catalog = if needs_system {
             FontCatalog::with_system_fonts()
         } else {

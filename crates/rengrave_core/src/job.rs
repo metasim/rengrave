@@ -38,6 +38,11 @@ impl Job {
                 settings.seg_arc,
                 &Font::codes_for_text(&settings.text),
             )?,
+            InputType::FontPage => fonts.load(
+                &settings.font,
+                settings.seg_arc,
+                &Font::codes_in(settings.font_page_codes()),
+            )?,
             InputType::Image => {
                 if settings.image_file.as_os_str().is_empty() {
                     return Err(Error::Import("no image file selected".into()));
@@ -58,6 +63,8 @@ impl Job {
     pub fn needs_reload(old: &Settings, new: &Settings) -> bool {
         old.input_type != new.input_type
             || old.font != new.font
+            || (new.input_type == InputType::FontPage
+                && old.font_page_codes() != new.font_page_codes())
             || Self::characters_beyond_latin1(&old.text)
                 != Self::characters_beyond_latin1(&new.text)
             || old.image_file != new.image_file
@@ -147,6 +154,44 @@ mod tests {
         };
         let err = Job::load(settings, &test_support::catalog()).unwrap_err();
         assert!(matches!(err, Error::Font(_)), "{err}");
+    }
+
+    #[test]
+    fn a_font_page_loads_only_its_block() {
+        let settings = Settings {
+            input_type: InputType::FontPage,
+            font_block: "Basic Latin".into(),
+            ..Settings::default()
+        };
+        let job = load(settings).unwrap();
+        assert!(job.font.glyph('F').is_some());
+        assert!(job.font.glyph('\u{e9}').is_none());
+        assert!(job.font.count_in(0..=0xFF) >= job.font.glyphs.len());
+        let coverage = job.font.coverage();
+        assert_eq!(coverage.blocks[0].0.name, "Basic Latin");
+        assert!(coverage.latin > 90);
+    }
+
+    #[test]
+    fn changing_the_page_reloads_only_a_font_page() {
+        let old = Settings {
+            input_type: InputType::FontPage,
+            ..Settings::default()
+        };
+        let new = Settings {
+            font_block: "Basic Latin".into(),
+            ..old.clone()
+        };
+        assert!(Job::needs_reload(&old, &new));
+        let text = Settings {
+            input_type: InputType::Text,
+            ..old
+        };
+        let moved = Settings {
+            font_block: "Basic Latin".into(),
+            ..text.clone()
+        };
+        assert!(!Job::needs_reload(&text, &moved));
     }
 
     #[test]

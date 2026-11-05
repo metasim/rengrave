@@ -14,8 +14,8 @@ use crate::worker::{Update, Worker};
 use egui::{CentralPanel, Key, KeyboardShortcut, Modifiers, Panel, RichText, Ui};
 use rengrave_core::font::extension_upper;
 use rengrave_core::{
-    CarvePath, CarvePoint, CleanupBit, CleanupOps, CutType, Design, FontCatalog, FontRef,
-    GcodeProgram, InputType, Issue, Justify, Settings, Units,
+    CarvePath, CarvePoint, CleanupBit, CleanupOps, CutType, Design, FontCatalog, FontCoverage,
+    FontRef, GcodeProgram, InputType, Issue, Justify, Settings, Units,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -166,6 +166,8 @@ pub struct RengraveApp {
 
     error: Option<String>,
     warnings: Vec<String>,
+    /// The characters of the font of the latest layout.
+    pub(crate) font_coverage: Arc<FontCoverage>,
     /// The latest message that is not derived from the job state.
     notice: Option<Status>,
     /// Keep `notice` through the next recalculation, which it may itself have caused.
@@ -250,6 +252,7 @@ impl RengraveApp {
             gcode_cache: None,
             error: None,
             warnings: Vec::new(),
+            font_coverage: Arc::default(),
             notice: None,
             keep_notice: false,
         }
@@ -466,10 +469,14 @@ impl RengraveApp {
         }
         match update {
             Update::Layout {
-                design, warnings, ..
+                design,
+                warnings,
+                coverage,
+                ..
             } => {
                 self.design = Some(design);
                 self.warnings = warnings;
+                self.font_coverage = coverage;
                 self.gcode_cache = None;
                 self.scene_revision += 1;
             }
@@ -750,6 +757,11 @@ impl RengraveApp {
         if let Some(path) = self.dialogs.pick_file(FileKind::Font, None) {
             self.add_font_file(&path, select);
         }
+    }
+
+    /// The characters the font of the latest layout has, by Unicode block.
+    pub fn font_coverage(&self) -> &FontCoverage {
+        &self.font_coverage
     }
 
     /// The installed fonts and the user's font library.

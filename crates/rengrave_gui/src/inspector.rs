@@ -10,6 +10,7 @@ use crate::app::{RengraveApp, Tab};
 use crate::icons;
 use crate::widgets::{Form, Number, UiExt};
 use egui::{CollapsingHeader, Grid, Ui};
+use rengrave_core::unicode_blocks::UnicodeBlock;
 use rengrave_core::{
     ArcFit, BitShape, CheckScope, CleanupBit, CutType, FontRef, HeightCalc, InputType, Justify,
     Origin, Settings, Tracer, TurnPolicy,
@@ -77,12 +78,21 @@ impl RengraveApp {
                     &mut self.settings.input_type,
                     &[
                         (InputType::Text, "Text", "Engrave text in a font"),
+                        (
+                            InputType::FontPage,
+                            "Font Page",
+                            "Engrave a page of the characters in a font",
+                        ),
                         (InputType::Image, "Image", "Engrave a DXF drawing or bitmap"),
                     ],
                 );
                 ui.add_space(4.0);
+                if self.settings.input_type.uses_font() {
+                    self.font_row(ui);
+                }
                 match self.settings.input_type {
                     InputType::Text => self.text_source(ui),
+                    InputType::FontPage => self.font_page_source(ui),
                     InputType::Image => self.image_source(ui),
                 }
             });
@@ -107,7 +117,10 @@ impl RengraveApp {
                 .desired_width(f32::INFINITY),
         )
         .labelled_by(label.id);
+    }
 
+    /// The font picker, shared by the modes that engrave characters.
+    fn font_row(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             let selected = self.font_label();
             let label = ui.label(ui.control_label("Font"));
@@ -118,10 +131,69 @@ impl RengraveApp {
             response
                 .response
                 .labelled_by(label.id)
-                .on_hover_text("The font for the text");
+                .on_hover_text("The font to engrave");
         });
-        ui.checkbox(&mut self.settings.show_font_index, "Show all characters")
-            .on_hover_text("Lay out the Latin-1 characters of the font, to see what it contains");
+    }
+
+    /// The block chooser and pager of the font page.
+    fn font_page_source(&mut self, ui: &mut Ui) {
+        let coverage = self.font_coverage.clone();
+        let latin = "Basic Latin and Latin-1";
+        let selected = match UnicodeBlock::named(&self.settings.font_block) {
+            Some(block) => block.name,
+            None => latin,
+        };
+        ui.horizontal(|ui| {
+            let label = ui.label(ui.control_label("Characters"));
+            let response = egui::ComboBox::from_id_salt("font_block_combo")
+                .selected_text(selected)
+                .width(170.0)
+                .show_ui(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(260.0)
+                        .show(ui, |ui| {
+                            let mut chosen = self.settings.font_block.clone();
+                            ui.selectable_value(
+                                &mut chosen,
+                                String::new(),
+                                format!("{latin} ({})", coverage.latin),
+                            );
+                            for (block, count) in &coverage.blocks {
+                                ui.selectable_value(
+                                    &mut chosen,
+                                    block.name.to_string(),
+                                    format!("{} ({count})", block.name),
+                                );
+                            }
+                            if chosen != self.settings.font_block {
+                                self.settings.font_block = chosen;
+                                self.settings.font_page = 0;
+                            }
+                        });
+                });
+            response.response.labelled_by(label.id).on_hover_text(
+                "The Unicode block to lay out; only blocks the font covers are listed",
+            );
+        });
+        let pages = UnicodeBlock::named(&self.settings.font_block).map_or(1, |b| b.page_count());
+        if pages > 1 {
+            let page = self.settings.font_page.min(pages - 1);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(page > 0, egui::Button::new("Previous"))
+                    .clicked()
+                {
+                    self.settings.font_page = page - 1;
+                }
+                ui.label(format!("Page {} of {pages}", page + 1));
+                if ui
+                    .add_enabled(page + 1 < pages, egui::Button::new("Next"))
+                    .clicked()
+                {
+                    self.settings.font_page = page + 1;
+                }
+            });
+        }
     }
 
     fn font_menu(&mut self, ui: &mut Ui) {
@@ -314,7 +386,7 @@ impl RengraveApp {
     }
 
     fn size_section(&mut self, ui: &mut Ui) {
-        let is_text = self.settings.input_type == InputType::Text;
+        let is_text = self.settings.input_type.uses_font();
         let height_unit: &str = if self.settings.use_image_size && !is_text {
             PERCENT
         } else {

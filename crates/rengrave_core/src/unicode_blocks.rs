@@ -6,6 +6,7 @@
 //! The table is read from `data/Blocks.txt`, the Unicode Character Database file, which is
 //! distributed under the Unicode License v3.
 
+use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
 /// A named range of code points, inclusive at both ends.
@@ -20,6 +21,10 @@ pub struct UnicodeBlock {
 }
 
 impl UnicodeBlock {
+    /// The most code points shown on a page, so that a block such as CJK Unified Ideographs
+    /// is read and laid out in pieces.
+    pub const PAGE_SIZE: u32 = 500;
+
     /// Every block, in code point order.
     pub fn all() -> &'static [Self] {
         static BLOCKS: OnceLock<Vec<UnicodeBlock>> = OnceLock::new();
@@ -31,6 +36,23 @@ impl UnicodeBlock {
         let blocks = Self::all();
         let idx = blocks.partition_point(|b| b.last < code);
         blocks.get(idx).filter(|b| b.first <= code)
+    }
+
+    /// The block called `name`, or `None` for an empty or unknown name.
+    pub fn named(name: &str) -> Option<&'static Self> {
+        Self::all().iter().find(|b| b.name == name)
+    }
+
+    /// The number of pages of [`Self::PAGE_SIZE`] code points needed to show the block.
+    pub const fn page_count(&self) -> u32 {
+        self.len().div_ceil(Self::PAGE_SIZE)
+    }
+
+    /// The code points of page `page`, counted from zero, which holds at most
+    /// [`Self::PAGE_SIZE`] of them.
+    pub fn page_codes(&self, page: u32) -> RangeInclusive<u32> {
+        let first = self.first + page.min(self.page_count() - 1) * Self::PAGE_SIZE;
+        first..=self.last.min(first + Self::PAGE_SIZE - 1)
     }
 
     /// The number of code points in the block, assigned or not.
@@ -88,6 +110,19 @@ mod tests {
         );
         assert!(UnicodeBlock::containing(0x10_FFFF).is_some());
         assert!(UnicodeBlock::containing(0x11_0000).is_none());
+    }
+
+    #[test]
+    fn large_blocks_are_split_into_pages() {
+        let cjk = UnicodeBlock::named("CJK Unified Ideographs").unwrap();
+        assert_eq!(cjk.page_count(), 42);
+        assert_eq!(cjk.page_codes(0), 0x4E00..=0x4E00 + 499);
+        assert_eq!(*cjk.page_codes(41).end(), cjk.last);
+        assert_eq!(cjk.page_codes(99), cjk.page_codes(41));
+        let latin = UnicodeBlock::named("Basic Latin").unwrap();
+        assert_eq!(latin.page_count(), 1);
+        assert_eq!(latin.page_codes(0), 0..=0x7F);
+        assert!(UnicodeBlock::named("").is_none());
     }
 
     #[test]

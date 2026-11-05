@@ -11,10 +11,12 @@
 //! [`Font`] whose glyphs are lists of straight strokes.
 
 use crate::error::{Error, Result};
+use crate::unicode_blocks::UnicodeBlock;
 use skrifa::instance::{LocationRef, Size};
 use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 use std::collections::BTreeMap;
+use std::ops::RangeInclusive;
 use std::path::Path;
 
 /// A straight stroke in font units.
@@ -65,17 +67,54 @@ impl Glyph {
     }
 }
 
+/// The Unicode blocks a font has characters in; see [`Font::coverage`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FontCoverage {
+    /// The number of characters in Basic Latin and Latin-1 Supplement together.
+    pub latin: usize,
+    /// Every block with at least one character, in code point order, with the character count.
+    pub blocks: Vec<(&'static UnicodeBlock, usize)>,
+}
+
 /// A character set mapping Unicode code points to glyphs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Font {
-    /// Glyphs by code point, in ascending order.
+    /// Glyphs by code point, in ascending order. Only the characters that were asked for are
+    /// loaded.
     pub glyphs: BTreeMap<u32, Glyph>,
+    /// Every code point the font maps to a glyph, whether loaded or not, in ascending order.
+    pub available: Vec<u32>,
 }
 
 impl Font {
     /// Returns `true` if the font contains no characters.
     pub fn is_empty(&self) -> bool {
         self.glyphs.is_empty()
+    }
+
+    /// Which Unicode blocks the font has characters in.
+    pub fn coverage(&self) -> FontCoverage {
+        let mut blocks: Vec<(&'static UnicodeBlock, usize)> = Vec::new();
+        for &code in &self.available {
+            let Some(block) = UnicodeBlock::containing(code) else {
+                continue;
+            };
+            match blocks.last_mut() {
+                Some((last, count)) if std::ptr::eq(*last, block) => *count += 1,
+                _ => blocks.push((block, 1)),
+            }
+        }
+        FontCoverage {
+            latin: self.count_in(0..=0xFF),
+            blocks,
+        }
+    }
+
+    /// The number of characters the font has among the code points in `range`.
+    pub fn count_in(&self, range: RangeInclusive<u32>) -> usize {
+        let start = self.available.partition_point(|&c| c < *range.start());
+        let end = self.available.partition_point(|&c| c <= *range.end());
+        end - start
     }
 
     /// Looks up the glyph for `ch`.
@@ -119,6 +158,7 @@ impl Font {
         if let Some(k) = key {
             font.glyphs.insert(k, Glyph { strokes });
         }
+        font.available = font.glyphs.keys().copied().collect();
         font
     }
 
@@ -159,7 +199,17 @@ impl Font {
         let cap_height = probe.unwrap_or_else(|| f64::from(units_per_em) * 0.7);
         let factor = 9.0 / cap_height;
 
-        let mut font = Self::default();
+        let mut available: Vec<u32> = charmap
+            .mappings()
+            .map(|(code, _)| code)
+            .filter(|&code| code != 0)
+            .collect();
+        available.sort_unstable();
+        available.dedup();
+        let mut font = Self {
+            available,
+            ..Self::default()
+        };
         for &code in wanted {
             let Some(mut strokes) = charmap.map(code).and_then(draw) else {
                 continue;
@@ -179,6 +229,11 @@ impl Font {
             ));
         }
         Ok(font)
+    }
+
+    /// The code points in `range`, without the null character.
+    pub fn codes_in(range: RangeInclusive<u32>) -> Vec<u32> {
+        range.filter(|&c| c != 0).collect()
     }
 
     /// The code points to load by default: Latin-1 and every character of `text`.
@@ -217,6 +272,7 @@ impl Font {
     pub fn from_drawing(strokes: Vec<Stroke>) -> Self {
         let mut font = Self::default();
         font.glyphs.insert(IMAGE_GLYPH as u32, Glyph { strokes });
+        font.available = vec![IMAGE_GLYPH as u32];
         font
     }
 }

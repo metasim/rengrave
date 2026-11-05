@@ -709,10 +709,9 @@ mod tests {
     fn tool_paths_of_real_glyphs_draw_within_their_extent() {
         use rengrave_core::{FontCatalog, FontRef, InputType, Job, Progress, Units};
         let settings = Settings {
-            input_type: InputType::Text,
+            input_type: InputType::FontPage,
             cut_type: CutType::VCarve,
             font: FontRef::User("Hack".into()),
-            show_font_index: true,
             ..Settings::with_units(Units::Millimeters)
         };
         let font_file =

@@ -4,8 +4,8 @@
 //! Runs layout and toolpath calculations on a background thread.
 
 use rengrave_core::{
-    CarvePath, CarvePoint, CleanupBit, CleanupPaths, CutType, Design, Error, FontCatalog, Job,
-    Progress, Settings,
+    CarvePath, CarvePoint, CleanupBit, CleanupPaths, CutType, Design, Error, FontCatalog,
+    FontCoverage, Job, Progress, Settings,
 };
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -41,6 +41,8 @@ pub enum Update {
         design: Arc<Design>,
         /// Non-fatal notes from loading the source.
         warnings: Vec<String>,
+        /// The characters the font has, for choosing a page of it.
+        coverage: Arc<FontCoverage>,
     },
     /// The V-carve toolpath is finished.
     Carve {
@@ -90,6 +92,7 @@ impl Worker {
             notify: Arc::new(notify),
             fonts,
             job: None,
+            coverage: Arc::default(),
         };
         std::thread::Builder::new()
             .name("rengrave-worker".into())
@@ -160,6 +163,8 @@ struct ThreadState {
     notify: Arc<dyn Fn() + Send + Sync>,
     fonts: Arc<FontCatalog>,
     job: Option<Job>,
+    /// The coverage of the font of `job`.
+    coverage: Arc<FontCoverage>,
 }
 
 impl ThreadState {
@@ -213,7 +218,9 @@ impl ThreadState {
             job.settings = settings;
         } else {
             self.job = None;
-            self.job = Some(Job::load(settings, &self.fonts)?);
+            let job = Job::load(settings, &self.fonts)?;
+            self.coverage = Arc::new(job.font.coverage());
+            self.job = Some(job);
         }
         Ok(self.job.as_ref().expect("assigned above"))
     }
@@ -242,7 +249,9 @@ impl ThreadState {
         carve: bool,
         progress: &Progress,
     ) -> Result<(), Error> {
-        let job = self.job_for(settings)?;
+        self.job_for(settings)?;
+        let coverage = self.coverage.clone();
+        let job = self.job.as_ref().expect("loaded by job_for");
         let warnings = job.warnings.clone();
         let design = job.layout()?;
         let wants_carve = carve && job.settings.cut_type == CutType::VCarve;
@@ -251,6 +260,7 @@ impl ThreadState {
             generation,
             design: Arc::new(design.clone()),
             warnings,
+            coverage,
         });
         if wants_carve {
             let mut sorted = design;
