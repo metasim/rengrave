@@ -223,32 +223,37 @@ impl RengraveApp {
         }
     }
 
-    /// The "User fonts" group of the picker.
+    /// A group heading of the picker.
+    fn font_group_heading(ui: &mut Ui, name: &str) {
+        ui.label(egui::RichText::new(name).strong().weak());
+    }
+
+    /// The "User fonts" group of the picker, ending with the entry that adds one.
     fn user_font_entries(&mut self, ui: &mut Ui, matches: &dyn Fn(&str) -> bool) {
-        ui.weak("User fonts");
+        Self::font_group_heading(ui, "User fonts");
         let fonts = self.fonts.user_fonts();
-        let mut shown = false;
         for font in fonts.iter().filter(|f| matches(&f.name)) {
-            shown = true;
             ui.selectable_value(
                 &mut self.settings.font,
                 FontRef::User(font.name.clone()),
                 &font.name,
             );
         }
-        if !shown {
-            ui.weak(if fonts.is_empty() {
-                "None added yet"
-            } else {
-                "No match"
-            });
+        if ui
+            .button("Add…")
+            .on_hover_text("Add a font file to your fonts and use it")
+            .clicked()
+        {
+            ui.close();
+            self.add_font_dialog(true);
         }
     }
 
     /// The "System fonts" group of the picker.
     fn system_font_entries(&mut self, ui: &mut Ui, matches: &dyn Fn(&str) -> bool) {
-        ui.add_space(4.0);
-        ui.weak("System fonts");
+        ui.add_space(2.0);
+        ui.separator();
+        Self::font_group_heading(ui, "System fonts");
         if self.fonts.is_scanning() {
             ui.horizontal(|ui| {
                 ui.spinner();
