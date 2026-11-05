@@ -1,4 +1,5 @@
 /target
 /F-Engrave-*.zip
 /.claude/
+/crates/rengrave_gui/assets/icon/Rengrave.iconset/
 .idea
