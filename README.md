@@ -55,6 +55,19 @@ cd crates/rengrave_gui && cargo bundle --release
 
 The app is written to `target/release/bundle/osx/Rengrave.app`.
 
+To build for both Apple silicon and Intel Macs, run the universal build script. It builds both
+targets (installing the Intel Rust target with `rustup` if needed), joins them with `lipo`, and
+makes a universal `Rengrave.app`; `--no-bundle` skips the app and its `cargo-bundle` requirement.
+
+```bash
+tools/macos-universal.sh
+```
+
+The results are in `target/universal/release`: `rengrave`, `rengrave-cli`, and
+`bundle/Rengrave.app`. The app is ad-hoc signed, so it runs on the machine that built it; other
+machines need a Developer ID signature and notarization. Set `MACOSX_DEPLOYMENT_TARGET` to choose
+the oldest macOS supported.
+
 The window shows the design, its carved area, and the tool path, recalculating after each change.
 Choose the text and font on the **Design** tab and the bit on the **Toolpath** tab, then choose
 **File ▸ Save G-code…**. The application starts in millimeters with the text "F-engrave" and

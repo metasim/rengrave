@@ -246,6 +246,10 @@ because `egui_kittest` draws into a different context than the one given to `new
   from `[package.metadata.bundle]`, with the identifier `net.metasim.rengrave`. The bundle has no
   icon and is not signed or notarized, so Gatekeeper will ask before it opens. *Open question:*
   whether to add an icon, and signing if the app is shared.
+- **Universal binaries.** Cargo builds one target at a time, so `tools/macos-universal.sh` builds
+  `aarch64-apple-darwin` and `x86_64-apple-darwin`, joins the executables with `lipo`, and puts the
+  universal executable into the arm64 bundle that `cargo-bundle` made, then signs it ad hoc. It
+  does not notarize.
 - **Branches.** The repository now has a remote, `origin`. `main` holds only the initial commit and
   receives work through pull requests, with `develop` as the integration branch. Nothing from the
   port has reached `main`.
