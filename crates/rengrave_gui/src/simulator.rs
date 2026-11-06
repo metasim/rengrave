@@ -195,7 +195,6 @@ impl SimulatorView {
             }
         });
         ui.separator();
-        ui.separator();
         // Rarely changed, so kept in a popover that stays open while the controls are adjusted.
         ui.options_menu(
             "Render",
