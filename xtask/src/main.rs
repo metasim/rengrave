@@ -26,9 +26,15 @@ enum Task {
     /// Build universal (Apple silicon and Intel) macOS binaries and Rengrave.app
     #[command(disable_help_flag = true)]
     BuildUniversal(Forwarded),
-    /// Build a universal Rengrave.dmg disk image
+    /// Build a universal Rengrave.dmg disk image, signed and notarized with --identity
     #[command(disable_help_flag = true)]
     BuildDmg(Forwarded),
+    /// Build, sign, and notarize the universal Rengrave.app and Rengrave.dmg (macOS)
+    #[command(disable_help_flag = true)]
+    Package(Forwarded),
+    /// Check that Rengrave.dmg is signed, notarized, and stapled
+    #[command(disable_help_flag = true)]
+    VerifyDmg(Forwarded),
     /// Render the application icon (Rengrave.icns) from its SVG source
     #[command(disable_help_flag = true)]
     BuildIcon(Forwarded),
@@ -49,6 +55,8 @@ impl Task {
         Ok(match self {
             Self::BuildUniversal(f) => ("build-universal".into(), f.args),
             Self::BuildDmg(f) => ("build-dmg".into(), f.args),
+            Self::Package(f) => ("package".into(), f.args),
+            Self::VerifyDmg(f) => ("verify-dmg".into(), f.args),
             Self::BuildIcon(f) => ("build-icon".into(), f.args),
             Self::External(mut all) => {
                 let name = all.remove(0).to_string_lossy().into_owned();

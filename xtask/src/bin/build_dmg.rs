@@ -4,14 +4,13 @@
 //! Builds `Rengrave.dmg`, a disk image holding the universal `Rengrave.app` and a link to the
 //! Applications folder, so it can be dragged there.
 //!
-//! The image is written to `target/universal/release/Rengrave.dmg`. The app inside is signed
-//! ad hoc, so other Macs show a Gatekeeper warning until it is signed with a Developer ID and
-//! notarized.
+//! The image is written to `target/universal/release/Rengrave.dmg`. By default the app inside is
+//! signed ad hoc, so other Macs show a Gatekeeper warning. With `--identity`, the app and the image
+//! are signed with that Developer ID, notarized, stapled, and verified.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
-use xshell::cmd;
-use xtask::{Project, Universal};
+use xtask::{Project, Signing, Universal};
 
 #[derive(Parser)]
 #[command(
@@ -21,31 +20,25 @@ use xtask::{Project, Universal};
 struct Args {
     #[command(flatten)]
     universal: Universal,
+    #[command(flatten)]
+    signing: Signing,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     let project = Project::locate()?;
+    if args.signing.enabled() {
+        args.signing.preflight(&project)?;
+    }
     args.universal.build_binaries(&project)?;
     let app = args.universal.build_app(&project)?;
-
-    let sh = project.shell()?;
-    let out = Universal::out_dir(&project);
-    let staging = out.join("dmg");
-    let dmg = out.join("Rengrave.dmg");
-    sh.remove_path(&staging)?;
-    sh.create_dir(&staging)?;
-    cmd!(sh, "cp -R {app} {staging}").run()?;
-    let link = staging.join("Applications");
-    cmd!(sh, "ln -s /Applications {link}").run()?;
-    sh.remove_path(&dmg)?;
-    cmd!(
-        sh,
-        "hdiutil create -volname Rengrave -srcfolder {staging} -format UDZO -ov {dmg}"
-    )
-    .run()
-    .context("hdiutil could not create the disk image")?;
-    sh.remove_path(&staging)?;
-    println!("Wrote {}", dmg.display());
+    if args.signing.enabled() {
+        args.signing.sign_app(&project, &app)?;
+    }
+    let dmg = Universal::build_dmg(&project, &app)?;
+    if args.signing.enabled() {
+        args.signing.sign_dmg(&project, &dmg)?;
+        Signing::verify(&project, &dmg)?;
+    }
     Ok(())
 }

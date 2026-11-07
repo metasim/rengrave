@@ -73,8 +73,22 @@ The results are in `target/universal/release`: `rengrave`, `rengrave-cli`, and
 cargo xtask build-dmg
 ```
 
-That writes `target/universal/release/Rengrave.dmg`. The app is ad-hoc signed, so it runs on the
-machine that built it; other machines need a Developer ID signature and notarization. It supports
+That writes `target/universal/release/Rengrave.dmg`. By default the app is ad-hoc signed, so it
+runs on the machine that built it. To produce a disk image that passes Gatekeeper on any Mac,
+give `build-dmg` a Developer ID identity; it then signs the app (hardened runtime), notarizes and
+staples it, signs, notarizes, and staples the image, and verifies the result:
+
+```bash
+xcrun notarytool store-credentials notary-profile --apple-id <Apple ID> --team-id <team ID>  # once
+cargo xtask build-dmg --identity "Developer ID Application: Name (TEAMID)"
+cargo xtask verify-dmg   # re-check an existing image
+```
+
+`cargo xtask package --identity "…"` does the same but requires the identity, so it is the command
+for making a release.
+
+`--identity`, `--keychain-profile` (default `notary-profile`), and `--entitlements` can also be
+set with `RENGRAVE_SIGNING_IDENTITY` and `RENGRAVE_NOTARY_PROFILE`. It supports
 macOS 13 (Ventura) and later; use `--deployment-target` to change that. `cargo xtask --help` lists
 all the tasks, including `build-icon`, which renders the icon files from the SVG source.
 

@@ -3,6 +3,10 @@
 
 //! Shared by the tasks: where the repository is, and the steps of the macOS release build.
 
+mod signing;
+
+pub use signing::Signing;
+
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use std::path::{Path, PathBuf};
@@ -65,6 +69,11 @@ impl Universal {
     /// Where the universal application bundle goes.
     pub fn app_path(project: &Project) -> PathBuf {
         Self::out_dir(project).join("bundle/Rengrave.app")
+    }
+
+    /// Where the disk image goes.
+    pub fn dmg_path(project: &Project) -> PathBuf {
+        Self::out_dir(project).join("Rengrave.dmg")
     }
 
     /// Builds both architectures of `rengrave` and `rengrave-cli` and joins each pair.
@@ -141,6 +150,30 @@ impl Universal {
             Self::archs(&sh, &executable)?
         );
         Ok(app)
+    }
+
+    /// Makes `Rengrave.dmg` from `app` and a link to the Applications folder, and returns its path.
+    pub fn build_dmg(project: &Project, app: &Path) -> Result<PathBuf> {
+        let sh = project.shell()?;
+        let staging = Self::out_dir(project).join("dmg");
+        let dmg = Self::dmg_path(project);
+        sh.remove_path(&staging)?;
+        sh.create_dir(&staging)?;
+        // `ditto` keeps the attributes and stapled ticket that `cp -R` can lose.
+        let staged_app = staging.join("Rengrave.app");
+        cmd!(sh, "ditto {app} {staged_app}").run()?;
+        let link = staging.join("Applications");
+        cmd!(sh, "ln -s /Applications {link}").run()?;
+        sh.remove_path(&dmg)?;
+        cmd!(
+            sh,
+            "hdiutil create -volname Rengrave -srcfolder {staging} -format UDZO -ov {dmg}"
+        )
+        .run()
+        .context("hdiutil could not create the disk image")?;
+        sh.remove_path(&staging)?;
+        println!("Wrote {}", dmg.display());
+        Ok(dmg)
     }
 
     fn archs(sh: &Shell, file: &Path) -> Result<String> {
