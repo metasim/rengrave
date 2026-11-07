@@ -3,10 +3,6 @@
 
 //! End-to-end tests of the `rengrave` binary.
 
-// The comparison of G-code with F-Engrave's, shared with the engine's parity tests.
-#[path = "../../rengrave_core/tests/common/mod.rs"]
-mod common;
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
@@ -126,7 +122,10 @@ fn cxf_font_and_settings_file_match_the_original_program() {
     let actual = String::from_utf8(out.stdout).unwrap();
     let trimmed: Vec<&str> = expected.lines().map(str::trim_end).collect();
     let actual: Vec<String> = actual.lines().map(str::to_string).collect();
-    common::assert_same_program("vcarve_box", &actual, &trimmed);
+    for (i, (a, e)) in actual.iter().zip(&trimmed).enumerate() {
+        assert_eq!(a, e, "first difference at line {}", i + 1);
+    }
+    assert_eq!(actual.len(), trimmed.len(), "program length");
 }
 
 #[test]

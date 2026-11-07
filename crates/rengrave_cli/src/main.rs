@@ -362,6 +362,7 @@ impl JobArgs {
         }
         if let Some(v) = self.radius {
             s.text_radius = v;
+            s.text_on_circle = v != 0.0;
         }
         if let Some(v) = self.justify {
             s.justify = match v {

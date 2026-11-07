@@ -282,3 +282,21 @@ because `egui_kittest` draws into a different context than the one given to `new
   about dropping a file is that button's tooltip.
 - **Bit group.** The bit choice and its profile are in one centered box. The profile drawing is
   filled and hatched to show the cut.
+
+## D19. Text shaping
+
+- **Engine.** TrueType and OpenType text is shaped with `harfrust`, the HarfBuzz port that egui's
+  text layout uses, and glyph outlines are read by index with `skrifa`. egui does not expose its
+  glyph outlines, only the shaper's results, so the engine is egui's, not its layout code. Shaping
+  applies the font's kerning (GPOS and `kern`), ligatures and other substitutions (GSUB), mark
+  placement, and the rules of the script and direction guessed from each line.
+- **What shaping replaces.** F-Engrave placed each character by the width of its own strokes, plus a
+  gap. That remains for CXF fonts, for pages of a font (Font Page mode), and for drawings, because
+  the parity tests with F-Engrave depend on it. CXF was kept for that reason, not removed.
+- **Spacing meaning.** For shaped fonts the advance is the font's. *Character spacing* of 25%, the
+  default, keeps it; each percent above or below adds or removes that fraction of the widest
+  character after every character, not between a letter and its marks. *Word spacing* of 100% is
+  the font's own space; tabs are three spaces. Line spacing is unchanged.
+- **Not done.** Choosing OpenType features (small caps, stylistic sets), per-run font fallback for
+  characters the font lacks (they are reported as missing, as before), and shaping across a tab.
+  Text on a circle still wraps the shaped line as a whole.

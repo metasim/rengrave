@@ -99,14 +99,14 @@ impl RengraveApp {
         CollapsingHeader::new(ui.section_heading("Size and spacing"))
             .default_open(true)
             .show(ui, |ui| self.size_section(ui));
+        if self.settings.input_type.uses_font() {
+            CollapsingHeader::new(ui.section_heading("Advanced spacing"))
+                .default_open(false)
+                .show(ui, |ui| self.spacing_section(ui));
+        }
         CollapsingHeader::new(ui.section_heading("Position"))
             .default_open(true)
             .show(ui, |ui| self.position_section(ui));
-        if self.settings.input_type == InputType::Text {
-            CollapsingHeader::new(ui.section_heading("Text on a circle"))
-                .default_open(self.settings.text_radius != 0.0)
-                .show(ui, |ui| self.circle_section(ui));
-        }
     }
 
     fn text_source(&mut self, ui: &mut Ui) {
@@ -124,10 +124,14 @@ impl RengraveApp {
         ui.horizontal(|ui| {
             let selected = self.font_label();
             let label = ui.label(ui.control_label("Font"));
+            // A click in the filter must not close the menu; choosing a font does.
+            let just_opened = !self.font_menu_open;
             let response = egui::ComboBox::from_id_salt("font_combo")
                 .selected_text(selected)
                 .width(170.0)
-                .show_ui(ui, |ui| self.font_menu(ui));
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show_ui(ui, |ui| self.font_menu(ui, just_opened));
+            self.font_menu_open = response.inner.is_some();
             response
                 .response
                 .labelled_by(label.id)
@@ -203,7 +207,10 @@ impl RengraveApp {
         }
     }
 
-    fn font_menu(&mut self, ui: &mut Ui) {
+    fn font_menu(&mut self, ui: &mut Ui, just_opened: bool) {
+        if just_opened {
+            self.font_filter.clear();
+        }
         let filter = ui.add(
             egui::TextEdit::singleline(&mut self.font_filter)
                 .hint_text("Filter")
@@ -211,6 +218,9 @@ impl RengraveApp {
         );
         filter
             .widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Filter fonts"));
+        if just_opened {
+            filter.request_focus();
+        }
         let needle = self.font_filter.to_lowercase();
         let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(&needle);
         egui::ScrollArea::vertical()
@@ -230,29 +240,42 @@ impl RengraveApp {
         }
     }
 
+    /// One font in the picker; choosing it closes the menu.
+    fn font_choice(&mut self, ui: &mut Ui, font: FontRef, label: &str) {
+        if ui
+            .selectable_label(self.settings.font == font, label)
+            .clicked()
+        {
+            self.settings.font = font;
+            ui.close();
+        }
+    }
+
     /// A group heading of the picker.
     fn font_group_heading(ui: &mut Ui, name: &str) {
         ui.label(egui::RichText::new(name).strong().weak());
     }
 
-    /// The "User fonts" group of the picker, ending with the entry that adds one.
+    /// The "User fonts" group of the picker, with a small button beside the heading that adds one.
     fn user_font_entries(&mut self, ui: &mut Ui, matches: &dyn Fn(&str) -> bool) {
-        Self::font_group_heading(ui, "User fonts");
+        let add = ui
+            .horizontal(|ui| {
+                Self::font_group_heading(ui, "User fonts");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.small_button("Add…")
+                        .on_hover_text("Add font files in Settings")
+                        .clicked()
+                })
+                .inner
+            })
+            .inner;
         let fonts = self.fonts.user_fonts();
         for font in fonts.iter().filter(|f| matches(&f.name)) {
-            ui.selectable_value(
-                &mut self.settings.font,
-                FontRef::User(font.name.clone()),
-                &font.name,
-            );
+            self.font_choice(ui, FontRef::User(font.name.clone()), &font.name);
         }
-        if ui
-            .button("Add…")
-            .on_hover_text("Add a font file to your fonts and use it")
-            .clicked()
-        {
+        if add {
+            self.show_app_settings(crate::preferences::SettingsPage::Fonts);
             ui.close();
-            self.add_font_dialog(true);
         }
     }
 
@@ -270,22 +293,14 @@ impl RengraveApp {
                 .request_repaint_after(std::time::Duration::from_millis(100));
             return;
         }
-        ui.selectable_value(
-            &mut self.settings.font,
-            FontRef::Default,
-            "Default (sans-serif)",
-        );
+        self.font_choice(ui, FontRef::Default, "Default (sans-serif)");
         for family in self
             .fonts
             .system_families()
             .into_iter()
             .filter(|f| matches(f))
         {
-            ui.selectable_value(
-                &mut self.settings.font,
-                FontRef::System(family.clone()),
-                family,
-            );
+            self.font_choice(ui, FontRef::System(family.clone()), &family);
         }
     }
 
@@ -410,6 +425,7 @@ impl RengraveApp {
             issues: &issues,
             length_unit: unit,
         };
+        let shaped = self.font_coverage.shaped;
         let s = &mut self.settings;
         ui.form_grid("size_grid", |ui| {
             form.number(
@@ -455,28 +471,6 @@ impl RengraveApp {
                 form.number(
                     ui,
                     Number {
-                        label: "Character spacing",
-                        field: "char_space",
-                        tip: "Gap between characters, as a percentage of the widest character",
-                        suffix: PERCENT,
-                        speed: 0.5,
-                    },
-                    &mut s.char_space,
-                );
-                form.number(
-                    ui,
-                    Number {
-                        label: "Word spacing",
-                        field: "word_space",
-                        tip: "Width of a space, as a percentage of the widest character",
-                        suffix: PERCENT,
-                        speed: 0.5,
-                    },
-                    &mut s.word_space,
-                );
-                form.number(
-                    ui,
-                    Number {
                         label: "Line spacing",
                         field: "line_space",
                         tip: "Distance between lines, as a multiple of the text height",
@@ -512,7 +506,71 @@ impl RengraveApp {
                     ],
                 );
                 ui.end_row();
+                if s.input_type == InputType::Text {
+                    ui.add_enabled_ui(shaped, |ui| {
+                        form.check(
+                            ui,
+                            "Ligatures",
+                            "Replace certain letter sequences, such as fi, fl, or ffi, with the single joined glyph the font designs for them. Turn off to engrave each letter separately. Applies to TrueType and OpenType fonts, not stroke fonts.",
+                            &mut s.ligatures,
+                        );
+                    });
+                }
             }
+        });
+    }
+
+    /// Kerning, and the spacing that applies when the font's own spacing is not used.
+    fn spacing_section(&mut self, ui: &mut Ui) {
+        let shaped = self.font_coverage.shaped && self.settings.input_type == InputType::Text;
+        let issues = self.issues.clone();
+        let mut form = Form {
+            issues: &issues,
+            length_unit: self.unit(),
+        };
+        let s = &mut self.settings;
+        if s.input_type == InputType::Text {
+            ui.form_grid("kerning_grid", |ui| {
+                ui.add_enabled_ui(shaped, |ui| {
+                    form.check(
+                        ui,
+                        "Kerning",
+                        "Use the font's own spacing, including the adjustments that set pairs such as AV or To closer together than their letters alone would be. Turn off to set the spacing yourself with Character spacing and Word spacing below. Applies to TrueType and OpenType fonts, not stroke fonts.",
+                        &mut s.kerning,
+                    );
+                });
+            });
+        }
+        // A shaped font keeps its own spacing while kerning is on.
+        let spacing_applies = !(shaped && s.kerning);
+        if !spacing_applies {
+            ui.weak("Turn off kerning to set the spacing yourself.");
+        }
+        ui.add_enabled_ui(spacing_applies, |ui| {
+            ui.form_grid("spacing_grid", |ui| {
+                form.number(
+                    ui,
+                    Number {
+                        label: "Character spacing",
+                        field: "char_space",
+                        tip: "Gap between characters, as a percentage of the widest character. For TrueType and OpenType fonts without kerning, 25% keeps the font's own spacing; more or less loosens or tightens it.",
+                        suffix: PERCENT,
+                        speed: 0.5,
+                    },
+                    &mut s.char_space,
+                );
+                form.number(
+                    ui,
+                    Number {
+                        label: "Word spacing",
+                        field: "word_space",
+                        tip: "Width of a space, as a percentage of the widest character. For TrueType and OpenType fonts without kerning, 100% is the font's own space.",
+                        suffix: PERCENT,
+                        speed: 0.5,
+                    },
+                    &mut s.word_space,
+                );
+            });
         });
     }
 
@@ -523,7 +581,7 @@ impl RengraveApp {
             ui.origin_grid(&mut self.settings.origin);
             ui.radio_value(&mut self.settings.origin, Origin::Default, "Design origin")
                 .on_hover_text("The start of the text baseline, or the origin of the file");
-            if self.settings.input_type == InputType::Text {
+            if self.settings.input_type == InputType::Text && self.settings.text_on_circle {
                 ui.radio_value(
                     &mut self.settings.origin,
                     Origin::ArcCenter,
@@ -569,7 +627,7 @@ impl RengraveApp {
             form.check(ui, "Mirror", "Mirror about a vertical line", &mut s.mirror);
             form.check(ui, "Flip", "Mirror about a horizontal line", &mut s.flip);
             let circle_applies = s.input_type == InputType::Text
-                && s.text_radius != 0.0
+                && s.text_on_circle
                 && s.cut_type == CutType::Engrave;
             form.check(
                 ui,
@@ -587,22 +645,49 @@ impl RengraveApp {
                 );
             }
         });
+        if self.settings.input_type == InputType::Text {
+            self.circle_controls(ui);
+        }
     }
 
-    fn circle_section(&mut self, ui: &mut Ui) {
+    /// The switch that places text on a circle, and the controls that shape the circle.
+    fn circle_controls(&mut self, ui: &mut Ui) {
+        ui.add_space(4.0);
         let unit = self.unit();
         let issues = self.issues.clone();
         let mut form = Form {
             issues: &issues,
             length_unit: unit,
         };
+        let default_radius = match self.settings.units {
+            rengrave_core::Units::Inches => 1.0,
+            rengrave_core::Units::Millimeters => 25.0,
+        };
         let s = &mut self.settings;
+        let was_on = s.text_on_circle;
+        ui.compact_form_grid("circle_switch_grid", |ui| {
+            form.check(
+                ui,
+                "Text on a circle",
+                "Place the text along a circle instead of a straight line",
+                &mut s.text_on_circle,
+            );
+        });
+        if s.text_on_circle && !was_on && s.text_radius == 0.0 {
+            s.text_radius = default_radius;
+        }
+        if !s.text_on_circle {
+            if s.origin == Origin::ArcCenter {
+                s.origin = Origin::Default;
+            }
+            return;
+        }
         ui.form_grid("circle_grid", |ui| {
             form.length(
                 ui,
                 "Radius",
                 "text_radius",
-                "Radius of the circle; zero means straight text",
+                "Radius of the circle the text is placed on",
                 &mut s.text_radius,
             );
             ui.label(ui.control_label("Side"))

@@ -14,6 +14,7 @@
 use crate::design::Design;
 use crate::error::{Error, Result};
 use crate::geom::Bounds;
+use crate::portable_math::PortableMath as _;
 use crate::settings::{BitShape, CutType, Settings};
 use glam::DVec3;
 use std::time::{Duration, Instant};
@@ -267,7 +268,7 @@ impl Simulation {
                 // The cone above the surface removes nothing, so model it only as wide as its
                 // deepest cut. This keeps stamping fast for wide bits.
                 let half = (settings.v_bit_angle / 2.0).to_radians();
-                let at_depth = 2.0 * -deepest * half.tan();
+                let at_depth = 2.0 * -deepest * half.portable_tan();
                 let diameter = at_depth.min(settings.v_bit_dia).max(1e-6);
                 let shape = ToolShape::VBit {
                     included_angle: settings.v_bit_angle,
@@ -725,7 +726,7 @@ mod tests {
         let (sim, _) = simulate(square_font(), square_settings());
         let half: f64 = 30f64.to_radians();
         for inset in [0.05, 0.1, 0.2] {
-            let expected = -inset / half.tan();
+            let expected = -inset / half.portable_tan();
             let actual = f64::from(sim.height_at(0.5, inset).unwrap());
             assert_abs_diff_eq!(actual, expected, epsilon = 0.012);
         }
@@ -748,7 +749,7 @@ mod tests {
         sim.run_to_end();
         let half: f64 = 30f64.to_radians();
         for p in &carve.points {
-            let expected = -p.r / half.tan();
+            let expected = -p.r / half.portable_tan();
             let actual = f64::from(sim.height_at(p.x, p.y).unwrap());
             // At least as deep as the position requires, within grid and simplification error.
             assert!(
@@ -764,7 +765,12 @@ mod tests {
             .map(|i| {
                 let angle = |k: i32| f64::from(k) * 5f64.to_radians();
                 let (a, b) = (-angle(i), -angle(i + 1));
-                Stroke::new(a.cos(), a.sin(), b.cos(), b.sin())
+                Stroke::new(
+                    a.portable_cos(),
+                    a.portable_sin(),
+                    b.portable_cos(),
+                    b.portable_sin(),
+                )
             })
             .collect();
         let run = |arc_fit| {
@@ -843,6 +849,7 @@ mod tests {
         let settings = Settings {
             input_type: InputType::Text,
             text: "F".into(),
+            text_on_circle: true,
             text_radius: 3.0,
             add_box: true,
             stroke_thickness: 0.05,
@@ -853,7 +860,7 @@ mod tests {
         let (sim, design) = simulate(font, settings);
         let (c, r) = (design.circle_center, design.circle_radius);
         for degrees in [0.0_f64, 90.0, 180.0, 270.0, 45.0] {
-            let (sin, cos) = degrees.to_radians().sin_cos();
+            let (sin, cos) = degrees.to_radians().portable_sin_cos();
             let on_ring = sim.height_at(c.x + r * cos, c.y + r * sin).unwrap();
             assert_abs_diff_eq!(f64::from(on_ring), -0.02, epsilon = 1e-4);
         }
@@ -1029,7 +1036,7 @@ mod tests {
         let shallow = Simulation::tool_for(&settings, -0.05);
         assert_abs_diff_eq!(
             shallow.radius(),
-            0.05 * 30f64.to_radians().tan(),
+            0.05 * 30f64.to_radians().portable_tan(),
             epsilon = 1e-9
         );
         let deep = Simulation::tool_for(&settings, -5.0);

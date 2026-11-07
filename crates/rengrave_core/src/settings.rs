@@ -13,6 +13,7 @@
 
 use crate::catalog::FontRef;
 use crate::geom::round_significant;
+use crate::portable_math::PortableMath as _;
 use crate::unicode_blocks::UnicodeBlock;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
@@ -300,13 +301,20 @@ pub struct Settings {
     pub char_space: f64,
     /// Word spacing as a percentage of the widest character.
     pub word_space: f64,
+    /// Whether text in a TrueType or OpenType font uses the font's kerning. When off,
+    /// `char_space` and `word_space` set the spacing instead.
+    pub kerning: bool,
+    /// Whether text in a TrueType or OpenType font uses the font's ligatures, such as `fi`.
+    pub ligatures: bool,
     /// How the scale is determined.
     pub height_calc: HeightCalc,
 
     // ---- Placement
     /// Rotation in degrees.
     pub angle: f64,
-    /// Radius of the circle text is placed on; zero for straight text.
+    /// Place text on a circle of `text_radius`. When off, the radius is kept but not used.
+    pub text_on_circle: bool,
+    /// Radius of the circle text is placed on when `text_on_circle` is set.
     pub text_radius: f64,
     /// Place text outside the circle rather than inside.
     pub outer: bool,
@@ -440,8 +448,11 @@ impl Default for Settings {
             line_space: 1.1,
             char_space: 25.0,
             word_space: 100.0,
+            kerning: true,
+            ligatures: true,
             height_calc: HeightCalc::MaxUsed,
             angle: 0.0,
+            text_on_circle: false,
             text_radius: 0.0,
             outer: true,
             upper: true,
@@ -616,9 +627,9 @@ impl Settings {
                 "Word space should be greater than or equal to 0",
             );
             check(
-                non_negative(self.text_radius),
+                non_negative(self.text_radius) && (!self.text_on_circle || self.text_radius > 0.0),
                 "text_radius",
-                "Radius should be greater than or equal to 0",
+                "Radius should be greater than 0",
             );
         } else {
             check(
@@ -772,11 +783,11 @@ impl Settings {
     pub fn effective_bit_dia(&self) -> f64 {
         let half_angle = self.half_angle();
         if self.inlay && self.bit_shape == BitShape::VBit {
-            return (-2.0 * self.allowance * half_angle.tan()).max(0.001);
+            return (-2.0 * self.allowance * half_angle.portable_tan()).max(0.001);
         }
         if self.v_depth_limit < 0.0 {
             match self.bit_shape {
-                BitShape::VBit => return -2.0 * self.v_depth_limit * half_angle.tan(),
+                BitShape::VBit => return -2.0 * self.v_depth_limit * half_angle.portable_tan(),
                 BitShape::Ball => {
                     let r = self.v_bit_dia / 2.0;
                     if self.v_depth_limit > -r {
@@ -792,7 +803,7 @@ impl Settings {
     /// Deepest Z the bit reaches, rounded to three decimals.
     pub fn max_cut_depth(&self) -> f64 {
         let bit_depth = match self.bit_shape {
-            BitShape::VBit => -self.v_bit_dia / 2.0 / self.half_angle().tan(),
+            BitShape::VBit => -self.v_bit_dia / 2.0 / self.half_angle().portable_tan(),
             BitShape::Ball | BitShape::Flat => -self.v_bit_dia / 2.0,
         };
         let limit = self.v_depth_limit;
@@ -987,8 +998,11 @@ impl Settings {
         set("LSPACE", self.line_space.to_string());
         set("CSPACE", self.char_space.to_string());
         set("WSPACE", self.word_space.to_string());
+        set("kerning", flag(self.kerning).to_string());
+        set("ligatures", flag(self.ligatures).to_string());
         set("TANGLE", self.angle.to_string());
         set("TRADIUS", self.text_radius.to_string());
+        set("text_on_circle", flag(self.text_on_circle).to_string());
         set("ZSAFE", self.z_safe.to_string());
         set("ZCUT", self.z_cut.to_string());
         set("STHICK", self.stroke_thickness.to_string());
@@ -1152,8 +1166,16 @@ impl Settings {
             "LSPACE" => self.line_space = num(value)?,
             "CSPACE" => self.char_space = num(value)?,
             "WSPACE" => self.word_space = num(value)?,
+            "kerning" => self.kerning = flag(value)?,
+            "ligatures" => self.ligatures = flag(value)?,
             "TANGLE" => self.angle = num(value)?,
-            "TRADIUS" => self.text_radius = num(value)?,
+            "TRADIUS" => {
+                self.text_radius = num(value)?;
+                // F-Engrave has no switch; a radius of zero means straight text. A
+                // `text_on_circle` line, which follows the radius, overrides this.
+                self.text_on_circle = self.text_radius != 0.0;
+            }
+            "text_on_circle" => self.text_on_circle = flag(value)?,
             "ZSAFE" => self.z_safe = num(value)?,
             "ZCUT" => self.z_cut = num(value)?,
             "STHICK" => self.stroke_thickness = num(value)?,
@@ -1546,7 +1568,10 @@ mod tests {
             v_depth_limit: -0.1,
             ..Settings::default()
         };
-        assert_abs_diff_eq!(s.effective_bit_dia(), 2.0 * 0.1 * 30f64.to_radians().tan());
+        assert_abs_diff_eq!(
+            s.effective_bit_dia(),
+            2.0 * 0.1 * 30f64.to_radians().portable_tan()
+        );
         assert_abs_diff_eq!(s.max_cut_depth(), -0.1);
     }
 
@@ -1592,7 +1617,10 @@ mod tests {
             allowance: -0.05,
             ..Settings::default()
         };
-        assert_abs_diff_eq!(s.effective_bit_dia(), 2.0 * 0.05 * 30f64.to_radians().tan());
+        assert_abs_diff_eq!(
+            s.effective_bit_dia(),
+            2.0 * 0.05 * 30f64.to_radians().portable_tan()
+        );
         s.allowance = 0.0;
         assert_abs_diff_eq!(s.effective_bit_dia(), 0.001);
     }
@@ -1623,6 +1651,10 @@ mod tests {
             input_type: InputType::FontPage,
             font_block: "Greek and Coptic".into(),
             font_page: 1,
+            kerning: false,
+            ligatures: false,
+            text_on_circle: true,
+            text_radius: 12.5,
             cut_type: CutType::VCarve,
             bit_shape: BitShape::Ball,
             arc_fit: ArcFit::Radius,
