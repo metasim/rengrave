@@ -10,6 +10,8 @@ pub use signing::Signing;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use std::path::{Path, PathBuf};
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 use xshell::{Shell, cmd};
 
 /// The repository the tasks run in.
@@ -37,6 +39,18 @@ impl Project {
     /// A path relative to the repository root.
     pub fn path(&self, relative: &str) -> PathBuf {
         self.root.join(relative)
+    }
+
+    /// Sends `tracing` output to the console in color. Every task calls this first. `RUST_LOG`
+    /// overrides the default `info` level.
+    pub fn init_logging() {
+        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .without_time()
+            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
+            .init();
     }
 
     /// Fails unless running on macOS, where `lipo`, `codesign`, and `hdiutil` exist.
@@ -86,12 +100,12 @@ impl Universal {
         let installed = cmd!(sh, "rustup target list --installed").read()?;
         for target in Self::TARGETS {
             if !installed.lines().any(|l| l.trim() == target) {
-                println!("Installing the Rust target {target}");
+                info!("Installing the Rust target {target}");
                 cmd!(sh, "rustup target add {target}").run()?;
             }
         }
         for target in Self::TARGETS {
-            println!("Building for {target}");
+            info!("Building for {target}");
             cmd!(
                 sh,
                 "cargo build --release --locked --target {target} -p rengrave_gui -p rengrave_cli"
@@ -106,7 +120,7 @@ impl Universal {
             let arm = format!("target/{}/release/{bin}", Self::ARM);
             let intel = format!("target/{}/release/{bin}", Self::INTEL);
             cmd!(sh, "lipo -create -output {output} {arm} {intel}").run()?;
-            println!("Wrote {}: {}", output.display(), Self::archs(&sh, &output)?);
+            info!("Wrote {}: {}", output.display(), Self::archs(&sh, &output)?);
         }
         Ok(())
     }
@@ -144,7 +158,7 @@ impl Universal {
         sh.copy_file(Self::out_dir(project).join("rengrave"), &executable)?;
         // Replacing the executable invalidates its signature; an ad-hoc one lets it run locally.
         cmd!(sh, "codesign --force --deep --sign - {app}").run()?;
-        println!(
+        info!(
             "Wrote {}: {}",
             app.display(),
             Self::archs(&sh, &executable)?
@@ -172,7 +186,7 @@ impl Universal {
         .run()
         .context("hdiutil could not create the disk image")?;
         sh.remove_path(&staging)?;
-        println!("Wrote {}", dmg.display());
+        info!("Wrote {}", dmg.display());
         Ok(dmg)
     }
 

@@ -3,4 +3,4 @@
 
 # `cargo xtask <task>` runs a maintenance task from the `xtask` crate; `cargo xtask --help` lists them.
 [alias]
-xtask = "run --quiet --package xtask --"
+xtask = "run --quiet --package xtask --bin xtask --"

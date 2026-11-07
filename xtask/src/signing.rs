@@ -9,6 +9,7 @@ use clap::Args;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use tracing::{error, info};
 use xshell::{Cmd, Shell, cmd};
 
 /// Mach-O magic numbers: 32/64-bit thin (either byte order) and fat/universal.
@@ -130,7 +131,7 @@ impl Signing {
     /// Signs `app` inside-out with the hardened runtime, notarizes it, and staples the ticket.
     pub fn sign_app(&self, project: &Project, app: &Path) -> Result<()> {
         let sh = project.shell()?;
-        println!("Signing {} (inside-out, hardened runtime)", app.display());
+        info!("Signing {} (inside-out, hardened runtime)", app.display());
         let main_exe = Self::main_executable(&sh, app)?;
         let mut nested = Vec::new();
         Self::collect_nested(app, app, &main_exe, &mut nested)?;
@@ -141,7 +142,7 @@ impl Signing {
         self.codesign(&sh, app, self.entitlements.as_deref())?;
         cmd!(sh, "codesign --verify --deep --strict --verbose=2 {app}").run()?;
 
-        println!("Notarizing {}", app.display());
+        info!("Notarizing {}", app.display());
         let zip = Self::work_dir(project)?.join("Rengrave-app.zip");
         cmd!(sh, "ditto -c -k --keepParent {app} {zip}").run()?;
         self.notarize(&sh, &zip)?;
@@ -153,9 +154,9 @@ impl Signing {
     pub fn sign_dmg(&self, project: &Project, dmg: &Path) -> Result<()> {
         let sh = project.shell()?;
         let identity = self.identity()?;
-        println!("Signing {}", dmg.display());
+        info!("Signing {}", dmg.display());
         cmd!(sh, "codesign --force --timestamp --sign {identity} {dmg}").run()?;
-        println!("Notarizing {}", dmg.display());
+        info!("Notarizing {}", dmg.display());
         self.notarize(&sh, dmg)?;
         cmd!(sh, "xcrun stapler staple {dmg}").run()?;
         Ok(())
@@ -183,7 +184,7 @@ impl Signing {
         .ignore_status()
         .output()?;
         let stdout = String::from_utf8_lossy(&out.stdout);
-        println!("{stdout}{}", String::from_utf8_lossy(&out.stderr));
+        info!("{stdout}{}", String::from_utf8_lossy(&out.stderr));
         if out.status.success() && stdout.contains("status: Accepted") {
             return Ok(());
         }
@@ -244,7 +245,7 @@ impl Signing {
     /// each result. Runs every check even after a failure, then errors if any failed.
     pub fn verify(project: &Project, dmg: &Path) -> Result<()> {
         let sh = project.shell()?;
-        println!("Checking {}\n", dmg.display());
+        info!("Checking {}", dmg.display());
         let mut failures = Vec::new();
 
         Self::step(
@@ -308,7 +309,7 @@ impl Signing {
         }
 
         if failures.is_empty() {
-            println!("All checks passed.");
+            info!("All checks passed.");
             Ok(())
         } else {
             bail!(
@@ -329,11 +330,11 @@ impl Signing {
         show: &[&str],
         require: &[&str],
     ) {
-        println!("--- {label}");
+        info!("{label}");
         let out = match command.ignore_status().output() {
             Ok(out) => out,
             Err(e) => {
-                println!("  could not run: {e}\n");
+                error!("  could not run: {e}");
                 failures.push(label.to_owned());
                 return;
             }
@@ -346,17 +347,14 @@ impl Signing {
         );
         for line in text.lines() {
             if show.is_empty() || show.iter().any(|s| line.contains(s)) {
-                println!("  {line}");
+                info!("  {line}");
             }
         }
         let missing: Vec<_> = require.iter().filter(|r| !text.contains(**r)).collect();
         if out.status.success() && missing.is_empty() {
-            println!("  PASS\n");
+            info!("  PASS");
         } else {
-            println!(
-                "  FAIL (exit {:?}, missing {missing:?})\n",
-                out.status.code()
-            );
+            error!("  FAIL (exit {:?}, missing {missing:?})", out.status.code());
             failures.push(label.to_owned());
         }
     }

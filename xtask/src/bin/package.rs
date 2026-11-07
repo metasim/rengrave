@@ -9,6 +9,7 @@
 
 use anyhow::{Result, bail};
 use clap::Parser;
+use tracing::info;
 use xtask::{Project, Signing, Universal};
 
 #[derive(Parser)]
@@ -24,6 +25,7 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    Project::init_logging();
     let args = Args::parse();
     Project::require_macos("package")?;
     if !args.signing.enabled() {
@@ -40,6 +42,6 @@ fn main() -> Result<()> {
     args.signing.sign_dmg(&project, &dmg)?;
     Signing::verify(&project, &dmg)?;
 
-    println!("\nPackaged {} and {}", app.display(), dmg.display());
+    info!("Packaged {} and {}", app.display(), dmg.display());
     Ok(())
 }

@@ -20,6 +20,7 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    Project::init_logging();
     let args = Args::parse();
     Project::require_macos("verify-dmg")?;
     let project = Project::locate()?;
