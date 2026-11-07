@@ -1009,7 +1009,7 @@ impl RengraveApp {
                 });
                 ui.menu_button("Edit", |ui| {
                     if ui
-                        .menu_item(true, icons::SETTINGS, "Application settings…", None)
+                        .menu_item(true, icons::SETTINGS, "Settings…", None)
                         .clicked()
                     {
                         self.show_app_settings(crate::preferences::SettingsPage::default());

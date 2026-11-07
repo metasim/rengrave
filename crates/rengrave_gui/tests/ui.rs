@@ -651,7 +651,7 @@ fn manage_fonts_opens_the_settings_dialog_on_the_fonts_page() {
     click(&mut harness, "Font");
     click(&mut harness, "Manage fonts…");
     harness.run_steps(2);
-    assert!(harness.query_by_label("Application settings").is_some());
+    assert!(harness.query_by_label("Settings").is_some());
     assert!(harness.query_by_label("Your fonts").is_some());
 }
 
@@ -708,7 +708,7 @@ fn add_in_the_font_list_opens_the_fonts_page_of_the_settings() {
     click(&mut harness, "Font");
     click(&mut harness, "Add…");
     harness.run_steps(2);
-    assert!(harness.query_by_label("Application settings").is_some());
+    assert!(harness.query_by_label("Settings").is_some());
     assert!(harness.query_by_label("Your fonts").is_some());
 }
 

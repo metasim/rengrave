@@ -263,7 +263,7 @@ impl RengraveApp {
                 Self::font_group_heading(ui, "User fonts");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.small_button("Add…")
-                        .on_hover_text("Add font files in the application settings")
+                        .on_hover_text("Add font files in Settings")
                         .clicked()
                 })
                 .inner

@@ -136,7 +136,7 @@ A file path on the command line (`rengrave job.ngc`) opens that settings file, f
 
 Installed fonts are always listed under **System fonts**. To use a font file that is not
 installed (including CXF stroke fonts), choose **Manage fonts…** in the font list, or **Edit ▸
-Application settings…**, and add it; it then appears under **User fonts**. Dropping a font file on
+Settings…**, and add it; it then appears under **User fonts**. Dropping a font file on
 the window adds it too. Your fonts are kept in `settings.yaml` in the application's configuration
 folder (`~/Library/Application Support/Rengrave` on macOS, `%APPDATA%\Rengrave\config` on
 Windows, `~/.config/rengrave` on Linux), which `rengrave-cli` reads as well, so
