@@ -136,6 +136,8 @@ pub struct RengraveApp {
     /// The installed fonts and the user's font library.
     pub(crate) fonts: Arc<FontCatalog>,
     pub(crate) font_filter: String,
+    /// Whether the font menu was open in the previous frame.
+    pub(crate) font_menu_open: bool,
     show_about: bool,
     /// Whether the application settings dialog is open.
     pub(crate) show_app_settings: bool,
@@ -233,6 +235,7 @@ impl RengraveApp {
             simulator: SimulatorView::default(),
             fonts,
             font_filter: String::new(),
+            font_menu_open: false,
             show_about: false,
             show_app_settings: false,
             settings_page: crate::preferences::SettingsPage::default(),
@@ -1006,7 +1009,7 @@ impl RengraveApp {
                 });
                 ui.menu_button("Edit", |ui| {
                     if ui
-                        .menu_item(true, icons::SETTINGS, "Application settings…", None)
+                        .menu_item(true, icons::SETTINGS, "Settings…", None)
                         .clicked()
                     {
                         self.show_app_settings(crate::preferences::SettingsPage::default());

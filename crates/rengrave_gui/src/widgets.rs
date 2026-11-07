@@ -88,7 +88,8 @@ impl Form<'_> {
     pub fn check(&mut self, ui: &mut Ui, label: &str, tip: &str, value: &mut bool) {
         ui.label("");
         ui.compact(|ui| ui.checkbox(value, label))
-            .on_hover_text(tip);
+            .on_hover_text(tip)
+            .on_disabled_hover_text(tip);
         ui.end_row();
     }
 }

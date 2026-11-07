@@ -1,0 +1,14 @@
+# The standard library's math functions call the operating system's math library, whose results
+# differ in the last bit between platforms. Use `PortableMath` (src/portable_math.rs) instead.
+disallowed-methods = [
+    { path = "f64::sin", reason = "platform-dependent; use PortableMath::portable_sin" },
+    { path = "f64::cos", reason = "platform-dependent; use PortableMath::portable_cos" },
+    { path = "f64::sin_cos", reason = "platform-dependent; use PortableMath::portable_sin_cos" },
+    { path = "f64::tan", reason = "platform-dependent; use PortableMath::portable_tan" },
+    { path = "f64::asin", reason = "platform-dependent; use PortableMath::portable_asin" },
+    { path = "f64::acos", reason = "platform-dependent; use PortableMath::portable_acos" },
+    { path = "f64::atan", reason = "platform-dependent; use PortableMath::portable_atan" },
+    { path = "f64::atan2", reason = "platform-dependent; use PortableMath::portable_atan2" },
+    { path = "f64::hypot", reason = "platform-dependent; use PortableMath::portable_hypot" },
+    { path = "f64::powf", reason = "platform-dependent; use PortableMath::portable_powf" },
+]

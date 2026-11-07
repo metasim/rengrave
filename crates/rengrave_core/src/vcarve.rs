@@ -13,6 +13,7 @@
 use crate::design::Design;
 use crate::error::Result;
 use crate::geom::{Point, Segment, ZERO, angle_from_sin_cos};
+use crate::portable_math::PortableMath as _;
 use crate::progress::Progress;
 use crate::settings::{BitShape, CheckScope, InputType, Settings};
 
@@ -481,7 +482,14 @@ impl CarvePath {
         while pcnt < phisteps - 1.0 {
             pcnt += 1.0;
             let sub_phi = (-pcnt * step_phi + theta).to_radians();
-            let rout = carver.max_circle(x, y, char_num, sub_phi.sin(), sub_phi.cos(), true);
+            let rout = carver.max_circle(
+                x,
+                y,
+                char_num,
+                sub_phi.portable_sin(),
+                sub_phi.portable_cos(),
+                true,
+            );
             self.record(x, y, sub_phi, rout, loop_num);
         }
     }

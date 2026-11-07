@@ -60,7 +60,7 @@ impl RengraveApp {
 
     pub(crate) fn app_settings_window(&mut self, ui: &mut Ui) {
         let mut open = self.show_app_settings;
-        egui::Window::new("Application settings")
+        egui::Window::new("Settings")
             .open(&mut open)
             .collapsible(false)
             .default_width(560.0)

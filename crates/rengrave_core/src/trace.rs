@@ -9,6 +9,7 @@
 use crate::dxf::DxfDrawing;
 use crate::error::{Error, Result};
 use crate::font::{Stroke, extension_upper};
+use crate::portable_math::PortableMath as _;
 use crate::settings::{Settings, Tracer, TurnPolicy};
 use std::collections::HashMap;
 use std::io::Write;
@@ -333,12 +334,12 @@ impl Bitmap {
             let a = points[lo];
             let b = points[hi % n];
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-            let len = dx.hypot(dy);
+            let len = dx.portable_hypot(dy);
             let mut worst = 0.0;
             let mut worst_i = None;
             for (i, p) in points.iter().enumerate().take(hi).skip(lo + 1) {
                 let d = if len == 0.0 {
-                    (p.0 - a.0).hypot(p.1 - a.1)
+                    (p.0 - a.0).portable_hypot(p.1 - a.1)
                 } else {
                     ((p.0 - a.0) * dy - (p.1 - a.1) * dx).abs() / len
                 };
@@ -376,7 +377,9 @@ impl Bitmap {
             let next = points[(i + 1) % n];
             let a = (cur.0 - prev.0, cur.1 - prev.1);
             let b = (next.0 - cur.0, next.1 - cur.1);
-            let turn = (a.0 * b.1 - a.1 * b.0).atan2(a.0 * b.0 + a.1 * b.1).abs();
+            let turn = (a.0 * b.1 - a.1 * b.0)
+                .portable_atan2(a.0 * b.0 + a.1 * b.1)
+                .abs();
             if turn.to_degrees() <= max_turn_deg {
                 out.push((cur.0 - a.0 * 0.25, cur.1 - a.1 * 0.25));
                 out.push((cur.0 + b.0 * 0.25, cur.1 + b.1 * 0.25));

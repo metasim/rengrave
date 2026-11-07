@@ -13,6 +13,7 @@
 use crate::design::Design;
 use crate::error::Result;
 use crate::geom::{Point, Segment, ZERO};
+use crate::portable_math::PortableMath as _;
 use crate::settings::{CleanupBit, CleanupOps, CutType, Settings};
 use crate::sort::PathRange;
 use crate::vcarve::CarvePoint;
@@ -116,7 +117,8 @@ impl Raster<'_> {
         for range in order {
             for i in range.indices() {
                 let (x, y, source) = passes[i];
-                if (x - x_old).hypot(y - y_old) > self.max_link && Some(source) != loop_old {
+                if (x - x_old).portable_hypot(y - y_old) > self.max_link && Some(source) != loop_old
+                {
                     *loop_cnt += 1;
                 }
                 out.push(CarvePoint {
@@ -536,7 +538,7 @@ mod tests {
         for p in &paths.points {
             let dx = (4.0 - p.x).max(p.x - 6.0).max(0.0);
             let dy = (4.0 - p.y).max(p.y - 6.0).max(0.0);
-            assert!(dx.hypot(dy) >= 0.75 - 1e-2, "{p:?}");
+            assert!(dx.portable_hypot(dy) >= 0.75 - 1e-2, "{p:?}");
         }
     }
 

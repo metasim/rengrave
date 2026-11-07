@@ -6,11 +6,12 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 publish = false
-default-run = "xtask"
 
 [dependencies]
 anyhow = "1"
 clap = { workspace = true, features = ["env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 xshell = "0.2"
 
 [lints]
@@ -32,3 +33,11 @@ path = "src/bin/build_dmg.rs"
 [[bin]]
 name = "xtask-build-icon"
 path = "src/bin/build_icon.rs"
+
+[[bin]]
+name = "xtask-verify-dmg"
+path = "src/bin/verify_dmg.rs"
+
+[[bin]]
+name = "xtask-package"
+path = "src/bin/package.rs"

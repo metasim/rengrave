@@ -10,6 +10,7 @@
 
 use anyhow::{Result, bail};
 use clap::Parser;
+use tracing::info;
 use xshell::cmd;
 use xtask::Project;
 
@@ -35,6 +36,7 @@ const SIZES: [(u32, &str); 10] = [
 struct Args {}
 
 fn main() -> Result<()> {
+    Project::init_logging();
     Args::parse();
     Project::require_macos("build-icon")?;
     let project = Project::locate()?;
@@ -65,10 +67,10 @@ fn main() -> Result<()> {
         .run()?;
     }
     cmd!(sh, "iconutil --convert icns --output {icns} {set}").run()?;
-    println!("Wrote {}", icns.display());
+    info!("Wrote {}", icns.display());
     // The window icon of the application, which is embedded in the executable.
     let png = dir.join("Rengrave.png");
     sh.copy_file(set.join("icon_512x512.png"), &png)?;
-    println!("Wrote {}", png.display());
+    info!("Wrote {}", png.display());
     Ok(())
 }

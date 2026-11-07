@@ -10,6 +10,7 @@
 use crate::design::Design;
 use crate::error::{Error, Result};
 use crate::geom::{ZERO, angle_from_sin_cos};
+use crate::portable_math::PortableMath as _;
 use crate::settings::{ArcFit, BitShape, CleanupBit, CutType, InputType, Settings};
 use crate::sort::PathRange;
 use crate::vcarve::{CarvePath, CarvePoint};
@@ -117,7 +118,8 @@ impl Fitted {
             {
                 let mut worst_arc = 0.0_f64;
                 for p in &points[lo..=hi] {
-                    let radial = ((center.0 - p[0]).hypot(center.1 - p[1]) - min_rad).abs();
+                    let radial =
+                        ((center.0 - p[0]).portable_hypot(center.1 - p[1]) - min_rad).abs();
                     let dist = (worst_dist_z * worst_dist_z + radial * radial).sqrt();
                     worst_arc = worst_arc.max(dist);
                 }
@@ -238,8 +240,8 @@ impl MotionWriter {
             let xc = self.last[0].unwrap_or_default() + i;
             let yc = self.last[1].unwrap_or_default() + j;
             let r1 = (xc - self.last[0].unwrap_or_default())
-                .hypot(yc - self.last[1].unwrap_or_default());
-            let r2 = (xc - to[0]).hypot(yc - to[1]);
+                .portable_hypot(yc - self.last[1].unwrap_or_default());
+            let r2 = (xc - to[0]).portable_hypot(yc - to[1]);
             radius_word = format!(" R{:.d$}", (r1 + r2) / 2.0);
         }
         let mut axis_words = String::new();
@@ -496,7 +498,7 @@ impl GcodeProgram {
             let (mut old_x, mut old_y) = (-99990.0_f64, -99990.0_f64);
             let mut first_stroke = true;
             for s in &design.segments {
-                let dist = (old_x - s.x1).hypot(old_y - s.y1);
+                let dist = (old_x - s.x1).portable_hypot(old_y - s.y1);
                 if dist > acc || first_stroke {
                     loop_num += 1;
                     first_stroke = false;
@@ -528,7 +530,7 @@ impl GcodeProgram {
                     let (x1, y1, loop_num) = ecoords[i];
                     if Some(loop_num) != loop_old {
                         motion.flush(out);
-                        if (x1 - last_x).hypot(y1 - last_y) > acc {
+                        if (x1 - last_x).portable_hypot(y1 - last_y) > acc {
                             out.push(format!("G0 Z{safe_val}"));
                             out.push(format!("G0 X{x1:.dp$} Y{y1:.dp$}"));
                             if feed_str == plunge_str {
@@ -571,11 +573,11 @@ impl GcodeProgram {
         let inlay_depth = settings.max_cut_depth();
         let z_of = |r: f64| match settings.bit_shape {
             BitShape::Ball => {
-                let theta = (r / bit_radius).clamp(-1.0, 1.0).acos();
-                -bit_radius * (1.0 - theta.sin())
+                let theta = (r / bit_radius).clamp(-1.0, 1.0).portable_acos();
+                -bit_radius * (1.0 - theta.portable_sin())
             }
             _ => {
-                let z = -r / half_angle.tan();
+                let z = -r / half_angle.portable_tan();
                 if settings.inlay { z + inlay_depth } else { z }
             }
         };
@@ -768,7 +770,7 @@ impl Fitted {
                 + (p[1] - a[1] - t * dy).powi(2)
                 + (p[2] - a[2] - t * dz).powi(2)
         };
-        dist2.powf(0.5)
+        dist2.portable_powf(0.5)
     }
 
     /// Radius of the XY circle through three points, or `None` if they are nearly collinear.
@@ -780,7 +782,9 @@ impl Fitted {
         if den < 1e-5 {
             return None;
         }
-        Some(x12.hypot(y12) * x23.hypot(y23) * x31.hypot(y31) / 2.0 / den)
+        Some(
+            x12.portable_hypot(y12) * x23.portable_hypot(y23) * x31.portable_hypot(y31) / 2.0 / den,
+        )
     }
 
     /// Center of the XY circle through three points, or `None` if they are nearly collinear.
@@ -805,8 +809,8 @@ impl Fitted {
     /// Returns `true` if three points on the circle lie in one quadrant, and the turn at the middle
     /// point is gentle enough that an arc is a reasonable fit.
     fn arc_is_fittable(center: (f64, f64), p1: Xyz, p2: Xyz, p3: Xyz) -> bool {
-        let la = (p1[0] - p2[0]).hypot(p1[1] - p2[1]);
-        let lb = (p3[0] - p2[0]).hypot(p3[1] - p2[1]);
+        let la = (p1[0] - p2[0]).portable_hypot(p1[1] - p2[1]);
+        let lb = (p3[0] - p2[0]).portable_hypot(p3[1] - p2[1]);
         if la == 0.0 || lb == 0.0 {
             return false;
         }
@@ -938,7 +942,7 @@ mod tests {
         let input: Vec<Xyz> = (0..200)
             .map(|i| {
                 let t = f64::from(i) * 0.05;
-                [t, t.sin(), (t * 0.5).cos()]
+                [t, t.portable_sin(), (t * 0.5).portable_cos()]
             })
             .collect();
         let tol = 0.01;
@@ -979,7 +983,7 @@ mod tests {
         (0..=n)
             .map(|i| {
                 let a = (from + (to - from) * i as f64 / n as f64).to_radians();
-                [cx + r * a.cos(), cy + r * a.sin(), 0.0]
+                [cx + r * a.portable_cos(), cy + r * a.portable_sin(), 0.0]
             })
             .collect()
     }
@@ -1224,6 +1228,7 @@ mod tests {
         let s = Settings {
             input_type: InputType::Text,
             text: "F".into(),
+            text_on_circle: true,
             text_radius: 3.0,
             add_box: true,
             ..engrave_settings()
@@ -1247,7 +1252,12 @@ mod tests {
             .map(|i| {
                 let angle = |k: i32| f64::from(k) * 5f64.to_radians();
                 let (a, b) = (-angle(i), -angle(i + 1));
-                Stroke::new(a.cos(), a.sin(), b.cos(), b.sin())
+                Stroke::new(
+                    a.portable_cos(),
+                    a.portable_sin(),
+                    b.portable_cos(),
+                    b.portable_sin(),
+                )
             })
             .collect();
         for arc_fit in [ArcFit::Center, ArcFit::Radius] {
@@ -1267,6 +1277,7 @@ mod tests {
         let around_text = Settings {
             input_type: InputType::Text,
             text: "F".into(),
+            text_on_circle: true,
             text_radius: 3.0,
             add_box: true,
             ..engrave_settings()

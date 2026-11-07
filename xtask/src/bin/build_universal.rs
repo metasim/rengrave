@@ -25,6 +25,7 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    Project::init_logging();
     let args = Args::parse();
     let project = Project::locate()?;
     args.universal.build_binaries(&project)?;
